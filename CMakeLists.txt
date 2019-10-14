@@ -9,7 +9,7 @@ if (MSVC)
   else()
     if(${CMAKE_SYSTEM_PROCESSOR} STREQUAL armv7l)
       # setting architecture explicitly on Pi because raspbian doesn't actually use correct ISA
-      add_compile_options(-Wall -Wextra -pedantic -Werror -march=armv8-a+crc)
+      add_compile_options(-Wall -Wextra -pedantic -Werror -Wno-psabi -march=armv8-a+crc)
     else()
       add_compile_options(-Wall -Wextra -pedantic -Werror -march=native)
     endif()
