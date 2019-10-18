@@ -2,10 +2,9 @@
 
 #include "solution.h"
 
-// DEBUG
-#include <stdio.h>
-
+// TODO: improve has function to something better (search online).
 int hash(int value, int size) { return value % size; }
+// TODO: try other probing strategies, exponential back-off, rehashing.
 int nextSlot(int currentSlot, int size) { return (currentSlot + 1) % size; }
 
 struct HashTableSlot {
@@ -15,9 +14,15 @@ struct HashTableSlot {
 };
 
 int Query1(struct Database* db, int managerID, int price) {
+  // TODO: use orders as build side, since it has the condition
+  // employeeManagerID == something and it turns out it has much
+  // less tuples than the other.
+  // TODO: implement partitioning.
+  // TODO: change size of hash table.
   size_t size = db->itemsCardinality + 1;
   struct HashTableSlot hashTable[size];
 
+  // TODO: find a way to remove this horrible hack.
   // Initialize all slots to be empty. Slow.
   for (size_t i = 0; i < size; i++) {
     hashTable[i].isOccupied = false;
@@ -33,12 +38,12 @@ int Query1(struct Database* db, int managerID, int price) {
     while (hashTable[hashValue].isOccupied) {
       hashValue = nextSlot(hashValue, size);
     }
-    struct HashTableSlot tmp = {true, buildInput->salesDate,
-                                buildInput->employee};
-    hashTable[hashValue] = tmp;
+    hashTable[hashValue].isOccupied = true;
+    hashTable[hashValue].salesDate = buildInput->salesDate;
+    hashTable[hashValue].employee = buildInput->employee;
   }
 
-  // Count matchin tuples.
+  // Count matching tuples.
   int tuplesCount = 0;
   for (size_t i = 0; i < db->ordersCardinality; i++) {
     struct OrderTuple* probeInput = &db->orders[i];
@@ -47,6 +52,8 @@ int Query1(struct Database* db, int managerID, int price) {
     }
     int hashValue = hash(probeInput->salesDate, size);
     while (hashTable[hashValue].isOccupied) {
+      // Keep on going even if we find a match because there could be
+      // duplicates.
       if (hashTable[hashValue].salesDate == probeInput->salesDate &&
           hashTable[hashValue].employee == probeInput->employee) {
         tuplesCount++;
