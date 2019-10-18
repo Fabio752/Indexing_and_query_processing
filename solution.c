@@ -1,41 +1,61 @@
-#include "solution.h"
 #include <stdbool.h>
 
+#include "solution.h"
+
+// DEBUG
+#include <stdio.h>
+
 int hash(int value, int size) { return value % size; }
-int nextSlot(int current_slot, int size) { return (current_slot + 1) % size; }
+int nextSlot(int currentSlot, int size) { return (currentSlot + 1) % size; }
 
 struct HashTableSlot {
-  bool is_occupied;
-  int sales_date;
+  bool isOccupied;
+  int salesDate;
   int employee;
 };
 
 int Query1(struct Database* db, int managerID, int price) {
-  int size = db->itemsCardinality + 1;
-  struct HashTableSlot* hash_table[size];
-  int touples_count = 0;
+  size_t size = db->itemsCardinality + 1;
+  struct HashTableSlot hashTable[size];
+
+  // Initialize all slots to be empty. Slow.
+  for (size_t i = 0; i < size; i++) {
+    hashTable[i].isOccupied = false;
+  }
+
+  // Build hash table.
   for (size_t i = 0; i < db->itemsCardinality; i++) {
-    struct ItemTuple* build_input = &db->items[i];
-    int hash_value = hash(build_input->salesDate, size);
-    while (hash_table[hash_value]->is_occupied) {
-      hash_value = nextSlot(hash_value, size);
+    struct ItemTuple* buildInput = &db->items[i];
+    if (buildInput->price >= price) {
+      continue;
     }
-    struct HashTableSlot hts = {true, build_input->salesDate,
-                                build_input->employee};
-    hash_table[hash_value] = &hts;
+    int hashValue = hash(buildInput->salesDate, size);
+    while (hashTable[hashValue].isOccupied) {
+      hashValue = nextSlot(hashValue, size);
+    }
+    struct HashTableSlot tmp = {true, buildInput->salesDate,
+                                buildInput->employee};
+    hashTable[hashValue] = tmp;
   }
+
+  // Count matchin tuples.
+  int tuplesCount = 0;
   for (size_t i = 0; i < db->ordersCardinality; i++) {
-    struct OrderTuple* probe_input = &db->orders[i];
-    int hash_value = hash(probe_input->salesDate, size);
-    while (hash_table[hash_value]->is_occupied &&
-           hash_table[hash_value] != probe_input->salesDate) {
-      hash_value = nextSlot(hash_value, size);
+    struct OrderTuple* probeInput = &db->orders[i];
+    if (probeInput->employeeManagerID != managerID) {
+      continue;
     }
-    if (hash_table[hash_value]->is_occupied) {
-      touples_count++;
+    int hashValue = hash(probeInput->salesDate, size);
+    while (hashTable[hashValue].isOccupied) {
+      if (hashTable[hashValue].salesDate == probeInput->salesDate &&
+          hashTable[hashValue].employee == probeInput->employee) {
+        tuplesCount++;
+      }
+      hashValue = nextSlot(hashValue, size);
     }
   }
-  return touples_count;
+
+  return tuplesCount;
 }
 
 int Query2(struct Database* db, int discount, int date) {
