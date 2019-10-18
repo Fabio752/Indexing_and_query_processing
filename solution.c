@@ -2,6 +2,9 @@
 
 #include "solution.h"
 
+// DEBUG
+#include <stdio.h>
+
 // TODO: improve has function to something better (search online).
 int hash(int value, int size) { return value % size; }
 // TODO: try other probing strategies, exponential back-off, rehashing.
@@ -14,12 +17,9 @@ struct HashTableSlot {
 };
 
 int Query1(struct Database* db, int managerID, int price) {
-  // TODO: use orders as build side, since it has the condition
-  // employeeManagerID == something and it turns out it has much
-  // less tuples than the other.
   // TODO: implement partitioning.
   // TODO: change size of hash table.
-  size_t size = db->itemsCardinality + 1;
+  size_t size = db->ordersCardinality + 1;
   struct HashTableSlot hashTable[size];
 
   // TODO: find a way to remove this horrible hack.
@@ -28,26 +28,33 @@ int Query1(struct Database* db, int managerID, int price) {
     hashTable[i].isOccupied = false;
   }
 
+  int slots = 0;
+  int conflicts = 0;
   // Build hash table.
-  for (size_t i = 0; i < db->itemsCardinality; i++) {
-    struct ItemTuple* buildInput = &db->items[i];
-    if (buildInput->price >= price) {
+  for (size_t i = 0; i < db->ordersCardinality; i++) {
+    struct OrderTuple* buildInput = &db->orders[i];
+    if (buildInput->employeeManagerID != managerID) {
       continue;
     }
     int hashValue = hash(buildInput->salesDate, size);
     while (hashTable[hashValue].isOccupied) {
+      conflicts++;
       hashValue = nextSlot(hashValue, size);
     }
     hashTable[hashValue].isOccupied = true;
     hashTable[hashValue].salesDate = buildInput->salesDate;
     hashTable[hashValue].employee = buildInput->employee;
+    slots++;
   }
+  printf("BUILD slots used: %d, conflicts: %d, size: %ld\n", slots, conflicts,
+         size);
 
+  conflicts = 0;
   // Count matching tuples.
   int tuplesCount = 0;
-  for (size_t i = 0; i < db->ordersCardinality; i++) {
-    struct OrderTuple* probeInput = &db->orders[i];
-    if (probeInput->employeeManagerID != managerID) {
+  for (size_t i = 0; i < db->itemsCardinality; i++) {
+    struct ItemTuple* probeInput = &db->items[i];
+    if (probeInput->price >= price) {
       continue;
     }
     int hashValue = hash(probeInput->salesDate, size);
@@ -61,6 +68,7 @@ int Query1(struct Database* db, int managerID, int price) {
       hashValue = nextSlot(hashValue, size);
     }
   }
+  printf("PROBE conflicts: %d\n", conflicts);
 
   return tuplesCount;
 }
