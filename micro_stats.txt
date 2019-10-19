@@ -1,0 +1,20 @@
+REHASHED (return ((currentSlot + 31) * 17) % size))
+Query1Benchmark/1024                 44.2 us         44.2 us        15835
+Query1Benchmark/4096                  172 us          172 us         4072
+Query1Benchmark/32768                1366 us         1366 us          504
+Query1Benchmark/262144              11234 us        11234 us           64
+Query1Benchmark/1048576             52536 us        52535 us           15
+
+EXPO BACKOFF
+Query1Benchmark/1024                 45.1 us         45.1 us        15495
+Query1Benchmark/4096                  176 us          176 us         3958
+Query1Benchmark/32768                1391 us         1391 us          497
+Query1Benchmark/262144              11636 us        11636 us           62
+Query1Benchmark/1048576             47286 us        47285 us           15
+
+LINEAR
+Query1Benchmark/1024                 45.4 us         45.4 us        15412
+Query1Benchmark/4096                  176 us          176 us         3973
+Query1Benchmark/32768                1403 us         1403 us          486
+Query1Benchmark/262144              11520 us        11520 us           62
+Query1Benchmark/1048576             47826 us        47825 us           15

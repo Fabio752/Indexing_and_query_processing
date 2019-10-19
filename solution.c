@@ -7,8 +7,10 @@
 
 // TODO: improve has function to something better (search online).
 int hash(int value, int size) { return value % size; }
-// TODO: try other probing strategies, exponential back-off, rehashing.
-int nextSlot(int currentSlot, int size) { return (currentSlot + 1) % size; }
+
+int nextSlotLinear(int currentSlot, int size) { return (currentSlot + 1) % size; }
+int nextSlotExpo(int currentSlot, int size, int backOff){ return (currentSlot + backOff) % size; }
+int nextSlotRehashed(int currentSlot, int size){ return ((currentSlot + 31) * 17) % size; }
 
 struct HashTableSlot {
   bool isOccupied;
@@ -30,6 +32,8 @@ int Query1(struct Database* db, int managerID, int price) {
 
   int slots = 0;
   int conflicts = 0;
+  // int backOff = 1;
+
   // Build hash table.
   for (size_t i = 0; i < db->ordersCardinality; i++) {
     struct OrderTuple* buildInput = &db->orders[i];
@@ -39,17 +43,22 @@ int Query1(struct Database* db, int managerID, int price) {
     int hashValue = hash(buildInput->salesDate, size);
     while (hashTable[hashValue].isOccupied) {
       conflicts++;
-      hashValue = nextSlot(hashValue, size);
+      hashValue = nextSlotLinear(hashValue, size);
+      // hashValue = nextSlotExpo(hashValue, size, backOff);
+      // hashValue = nextSlotRehashed(hashValue, size);
+      // backOff = backOff * 2;
     }
     hashTable[hashValue].isOccupied = true;
     hashTable[hashValue].salesDate = buildInput->salesDate;
     hashTable[hashValue].employee = buildInput->employee;
     slots++;
+    // backOff = 1;
   }
-  printf("BUILD slots used: %d, conflicts: %d, size: %ld\n", slots, conflicts,
-         size);
+  // printf("BUILD slots used: %d, conflicts: %d, size: %ld\n", slots, conflicts,
+  //       size);
 
   conflicts = 0;
+
   // Count matching tuples.
   int tuplesCount = 0;
   for (size_t i = 0; i < db->itemsCardinality; i++) {
@@ -65,10 +74,14 @@ int Query1(struct Database* db, int managerID, int price) {
           hashTable[hashValue].employee == probeInput->employee) {
         tuplesCount++;
       }
-      hashValue = nextSlot(hashValue, size);
+      hashValue = nextSlotLinear(hashValue, size);
+      // hashValue = nextSlotExpo(hashValue, size, backOff);
+      // hashValue = nextSlotRehashed(hashValue, size);
+      // backOff = backOff * 2;
     }
+    // backOff = 1;
   }
-  printf("PROBE conflicts: %d\n", conflicts);
+  // printf("PROBE conflicts: %d\n", conflicts);
 
   return tuplesCount;
 }
