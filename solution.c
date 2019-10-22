@@ -6,8 +6,25 @@
 // DEBUG
 #include <stdio.h>
 
+struct RLEDate {
+  int date;
+  int prefixCount;
+};
+
+struct HashTableSlot {
+  bool isOccupied;
+  int salesDate;
+  int employee;
+};
+
+struct StoresHashTableSlot {
+  bool isOccupied;
+  int managerID;
+};
+
 struct Indices {
-  int* orderedItemSalesDate;
+  struct RLEDate* RLEDates;
+  size_t RLEDatesCardinality;
 };
 
 // TODO: improve has function to something better (search online).
@@ -22,12 +39,6 @@ int nextSlotExpo(int currentSlot, int size, int backOff) {
 int nextSlotRehashed(int currentSlot, int size) {
   return ((currentSlot + 31) * 17) % size;
 }
-
-struct HashTableSlot {
-  bool isOccupied;
-  int salesDate;
-  int employee;
-};
 
 int Query1(struct Database* db, int managerID, int price) {
   // TODO: implement partitioning.
@@ -107,10 +118,13 @@ int Query2(struct Database* db, int discount, int date) {
   // Complexity:
   // - time: O(orders * log(items))
   // - space: O(1)
-  // 
+  //
   // Preprocessing:
   // - time: O(items * log(items))
   // - space: O(items)
+  struct Indices* indices = db->indices;
+  size_t RLEDatesCardinality = indices->RLEDatesCardinality;
+
   int tuplesCount = 0;
   for (size_t i = 0; i < db->ordersCardinality; i++) {
     if (db->orders[i].discount != discount) {
@@ -120,11 +134,10 @@ int Query2(struct Database* db, int discount, int date) {
     // Binary search the lower bound. Find the smallest date
     // >= orderDate - date.
     int target = orderDate - date;
-    size_t lb = 0, ub = db->itemsCardinality;
-    struct Indices* indices = db->indices;
+    size_t lb = 0, ub = RLEDatesCardinality;
     while (lb < ub) {
       size_t mid = (lb + ub) >> 1;
-      if (target <= indices->orderedItemSalesDate[mid]) {
+      if (target <= indices->RLEDates[mid].date) {
         ub = mid;
       } else {
         lb = mid + 1;
@@ -133,36 +146,36 @@ int Query2(struct Database* db, int discount, int date) {
     // Result is at position lb.
     // Note that lb could be out-of-bound, which means that all items
     // salesDate are too small.
-    if (lb == db->itemsCardinality) {
+    if (lb == indices->RLEDatesCardinality) {
       continue;
     }
     size_t leftIdx = lb;
 
     // Binary search the upper bound. Find the biggest date
-    // <= orderDate.
+    // <= orderDate. (Actually, we find the one after).
     // Do not reset the lower bound to zero since the location we are looking
-    // for is surely bigger than the current one.
-    ub = db->itemsCardinality;
+    // for is surely bigger or equal to the current one.
+    lb -= lb != 0;
+    ub = RLEDatesCardinality;
     while (lb < ub) {
       size_t mid = (lb + ub) >> 1;
-      if (orderDate >= indices->orderedItemSalesDate[mid]) {
+      if (orderDate >= indices->RLEDates[mid].date) {
         lb = mid + 1;
       } else {
         ub = mid;
       }
     }
     // Result is at position lb.
+    size_t rightIdx = lb;
 
-    int diff = lb - leftIdx;
-    tuplesCount += diff <= 0 ? 0 : diff;
+    int leftVal = leftIdx == 0 ? 0 : indices->RLEDates[leftIdx - 1].prefixCount;
+    int rightVal =
+        rightIdx == 0 ? 0 : indices->RLEDates[rightIdx - 1].prefixCount;
+
+    tuplesCount += rightVal - leftVal;
   }
   return tuplesCount;
 }
-
-struct StoresHashTableSlot {
-  bool isOccupied;
-  int managerID;
-};
 
 int Query3(struct Database* db, int countryID) {
   // Build Items hash table.
@@ -258,14 +271,40 @@ int compare(const void* a, const void* b) { return *(int*)a - *(int*)b; }
 void CreateIndices(struct Database* db) {
   struct Indices* indices = malloc(sizeof(struct Indices));
 
-  // Create orderedItesmSalesDate for query 2.
-  indices->orderedItemSalesDate = malloc(db->itemsCardinality * sizeof(int));
+  // Create indexes for query 2.
+  // Observation: usually there are many repeated dates, which means that using
+  // a Run-Length-Encoding with Length Prefix Summing should help compressing
+  // the data a lot.
+  int orderedItemSalesDate[db->itemsCardinality];
   for (size_t i = 0; i < db->itemsCardinality; i++) {
-    indices->orderedItemSalesDate[i] = db->items[i].salesDate;
+    orderedItemSalesDate[i] = db->items[i].salesDate;
   }
   // FIXME: Slow!!
-  qsort(indices->orderedItemSalesDate, db->itemsCardinality, sizeof(int),
-        compare);
+  qsort(orderedItemSalesDate, db->itemsCardinality, sizeof(int), compare);
+
+  // Find how many different elements are there.
+  size_t different = 1;
+  for (size_t i = 1; i < db->itemsCardinality; i++) {
+    if (orderedItemSalesDate[i] > orderedItemSalesDate[i - 1]) {
+      different++;
+    }
+  }
+
+  // Compute Run-Length-Encoding with Length Prefix Summing.
+  struct RLEDate* RLEDates = malloc(different * sizeof(struct RLEDate));
+  size_t RLEIndex = 0;
+  for (size_t i = 1; i < db->itemsCardinality; i++) {
+    if (orderedItemSalesDate[i] > orderedItemSalesDate[i - 1]) {
+      RLEDates[RLEIndex].date = orderedItemSalesDate[i - 1];
+      RLEDates[RLEIndex].prefixCount = i;
+      RLEIndex++;
+    }
+  }
+  // Add last elements.
+  RLEDates[RLEIndex].date = orderedItemSalesDate[db->itemsCardinality - 1];
+  RLEDates[RLEIndex].prefixCount = db->itemsCardinality;
+  indices->RLEDates = RLEDates;
+  indices->RLEDatesCardinality = RLEIndex + 1;
 
   db->indices = indices;
 }
@@ -273,6 +312,7 @@ void CreateIndices(struct Database* db) {
 void DestroyIndices(struct Database* db) {
   /// Free database indices
   struct Indices* indices = db->indices;
-  free(indices->orderedItemSalesDate);
+  free(indices->RLEDates);
   free(indices);
+  db->indices = NULL;
 }
