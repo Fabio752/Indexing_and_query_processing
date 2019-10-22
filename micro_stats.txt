@@ -23,23 +23,23 @@ Query1Benchmark/1048576             47826 us        47825 us           15
 Let's keep our results separate, since our machines are different.
 
 Benchmark results Marco
-CreateIndicesBenchmark/1024         0.653 us        0.655 us       842507
-CreateIndicesBenchmark/4096         0.646 us        0.649 us      1038245
-CreateIndicesBenchmark/32768        0.643 us        0.646 us      1076133
-CreateIndicesBenchmark/262144       0.658 us        0.661 us       938654
-CreateIndicesBenchmark/1048576      0.702 us        0.705 us      1077201
-Query1Benchmark/1024                 52.4 us         52.4 us        12802
-Query1Benchmark/4096                  216 us          215 us         3248
-Query1Benchmark/32768                1690 us         1690 us          401
-Query1Benchmark/262144              15033 us        15025 us           48
-Query1Benchmark/1048576             62066 us        62049 us           12
-Query2Benchmark/1024                 9.67 us         9.67 us        67539
-Query2Benchmark/4096                  251 us          251 us         4065
-Query2Benchmark/32768                9470 us         9459 us          116
-Query2Benchmark/262144             247773 us       243847 us            4
-Query2Benchmark/524288             621490 us       621345 us            1
-Query3Benchmark/1024               100912 us       100760 us            5
-Query3Benchmark/4096              1544206 us      1541131 us            1
+CreateIndicesBenchmark/1024          42.3 us         42.4 us        16424
+CreateIndicesBenchmark/4096           227 us          226 us         3101
+CreateIndicesBenchmark/32768         2220 us         2220 us          313
+CreateIndicesBenchmark/262144       21693 us        21687 us           33
+CreateIndicesBenchmark/1048576      95328 us        95323 us            7
+Query1Benchmark/1024                 51.6 us         51.6 us        12292
+Query1Benchmark/4096                  211 us          211 us         3198
+Query1Benchmark/32768                2242 us         2241 us          391
+Query1Benchmark/262144              19828 us        19796 us           26
+Query1Benchmark/1048576             64925 us        64920 us           11
+Query2Benchmark/1024                 2.60 us         2.60 us       210633
+Query2Benchmark/4096                 12.1 us         12.1 us        62920
+Query2Benchmark/32768                93.6 us         93.6 us         6128
+Query2Benchmark/262144                441 us          441 us         1605
+Query2Benchmark/524288                853 us          853 us          884
+Query3Benchmark/1024                86656 us        86651 us            7
+Query3Benchmark/4096              1385081 us      1384874 us            1
 Query3Benchmark/32768            92573559 us     92521522 us            1
 ^C (too slow)
 

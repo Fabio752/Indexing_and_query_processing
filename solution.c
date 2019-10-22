@@ -1,9 +1,14 @@
 #include <stdbool.h>
+#include <stdlib.h>
 
 #include "solution.h"
 
 // DEBUG
 #include <stdio.h>
+
+struct Indices {
+  int* orderedItemSalesDate;
+};
 
 // TODO: improve has function to something better (search online).
 int hash(int value, int size) { return value % size; }
@@ -93,20 +98,63 @@ int Query1(struct Database* db, int managerID, int price) {
   return tuplesCount;
 }
 
+// TODO: improve by using sparse table.
+// https://cp-algorithms.com/sequences/rmq.html
 int Query2(struct Database* db, int discount, int date) {
+  // Idea:
+  // iterate through orders and binary search inside items how many
+  // orders have been placed in the the relevant period.
+  // Complexity:
+  // - time: O(orders * log(items))
+  // - space: O(1)
+  // 
+  // Preprocessing:
+  // - time: O(items * log(items))
+  // - space: O(items)
   int tuplesCount = 0;
   for (size_t i = 0; i < db->ordersCardinality; i++) {
-    int orderDiscount = db->orders[i].discount;
-    if (orderDiscount != discount) {
+    if (db->orders[i].discount != discount) {
       continue;
     }
     int orderDate = db->orders[i].salesDate;
-    for (size_t j = 0; j < db->itemsCardinality; j++) {
-      if (db->items[j].salesDate <= orderDate &&
-          orderDate <= db->items[j].salesDate + date) {
-        tuplesCount++;
+    // Binary search the lower bound. Find the smallest date
+    // >= orderDate - date.
+    int target = orderDate - date;
+    size_t lb = 0, ub = db->itemsCardinality;
+    struct Indices* indices = db->indices;
+    while (lb < ub) {
+      size_t mid = (lb + ub) >> 1;
+      if (target <= indices->orderedItemSalesDate[mid]) {
+        ub = mid;
+      } else {
+        lb = mid + 1;
       }
     }
+    // Result is at position lb.
+    // Note that lb could be out-of-bound, which means that all items
+    // salesDate are too small.
+    if (lb == db->itemsCardinality) {
+      continue;
+    }
+    size_t leftIdx = lb;
+
+    // Binary search the upper bound. Find the biggest date
+    // <= orderDate.
+    // Do not reset the lower bound to zero since the location we are looking
+    // for is surely bigger than the current one.
+    ub = db->itemsCardinality;
+    while (lb < ub) {
+      size_t mid = (lb + ub) >> 1;
+      if (orderDate >= indices->orderedItemSalesDate[mid]) {
+        lb = mid + 1;
+      } else {
+        ub = mid;
+      }
+    }
+    // Result is at position lb.
+
+    int diff = lb - leftIdx;
+    tuplesCount += diff <= 0 ? 0 : diff;
   }
   return tuplesCount;
 }
@@ -204,11 +252,27 @@ int Query3(struct Database* db, int countryID) {
   return tupleCount;
 }
 
+// Comparison function for qsort.
+int compare(const void* a, const void* b) { return *(int*)a - *(int*)b; }
+
 void CreateIndices(struct Database* db) {
-  (void)db;  // prevent compiler warning about unused variable
+  struct Indices* indices = malloc(sizeof(struct Indices));
+
+  // Create orderedItesmSalesDate for query 2.
+  indices->orderedItemSalesDate = malloc(db->itemsCardinality * sizeof(int));
+  for (size_t i = 0; i < db->itemsCardinality; i++) {
+    indices->orderedItemSalesDate[i] = db->items[i].salesDate;
+  }
+  // FIXME: Slow!!
+  qsort(indices->orderedItemSalesDate, db->itemsCardinality, sizeof(int),
+        compare);
+
+  db->indices = indices;
 }
 
 void DestroyIndices(struct Database* db) {
   /// Free database indices
-  db->indices = NULL;
+  struct Indices* indices = db->indices;
+  free(indices->orderedItemSalesDate);
+  free(indices);
 }
