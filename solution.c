@@ -110,8 +110,6 @@ int Query1(struct Database* db, int managerID, int price) {
   return tuplesCount;
 }
 
-// TODO: improve by using sparse table.
-// https://cp-algorithms.com/sequences/rmq.html
 int Query2(struct Database* db, int discount, int date) {
   // Idea:
   // iterate through orders and binary search inside items how many
@@ -184,7 +182,7 @@ int Query3(struct Database* db, int countryID) {
   // TODO: change size of hash table.
   size_t size = db->itemsCardinality * 2;
   struct HashTableSlot hashTableItems[size];
-  
+
   // TODO: find a way to remove this horrible hack.
   // Initialize all slots to be empty. Slow.
   for (size_t i = 0; i < size; i++) {
@@ -194,7 +192,7 @@ int Query3(struct Database* db, int countryID) {
   int conflictsCount = 0;
   int backOff = 1;
   int conflicts = 0;
-  
+
   for (size_t i = 0; i < db->itemsCardinality; i++) {
     struct ItemTuple* buildInput = &db->items[i];
     int hashValue = hash(buildInput->salesDate, size);
@@ -213,8 +211,8 @@ int Query3(struct Database* db, int countryID) {
     backOff = 1;
     conflicts = 0;
   }
-  double time_taken = (clock() - start) / 1000000.0; 
-  time_taken = time_taken; // Because it gives a warning if not used.
+  double time_taken = (clock() - start) / 1000000.0;
+  time_taken = time_taken;  // Because it gives a warning if not used.
   printf("building hash table hashTableItems in sec: %f\n", time_taken);
   printf("items conflicts: %d\n", conflictsCount);
 
@@ -227,9 +225,9 @@ int Query3(struct Database* db, int countryID) {
     hashTableStores[i].isOccupied = false;
   }
   start = clock();
-  
+
   conflictsCount = 0;
-  
+
   // Build hash table.
   for (size_t i = 0; i < db->storesCardinality; i++) {
     struct StoreTuple* buildInput = &db->stores[i];
@@ -277,7 +275,8 @@ int Query3(struct Database* db, int countryID) {
             tupleCount++;
           }
           // hashValueStores = nextSlotLinear(hashValueStores, sizeStores);
-          hashValueStores = nextSlotExpo(hashValueStores, sizeStores, backOffStores);
+          hashValueStores =
+              nextSlotExpo(hashValueStores, sizeStores, backOffStores);
           // hashValueStores = nextSlotRehashed(hashValueStores, sizeStores);
           backOffStores = backOffStores + conflictsStores;
           conflictsStores++;
@@ -299,22 +298,55 @@ int Query3(struct Database* db, int countryID) {
   return tupleCount;
 }
 
-
 // Comparison function for qsort.
 int compare(const void* a, const void* b) { return *(int*)a - *(int*)b; }
 
-void CreateIndices(struct Database* db) {
-  struct Indices* indices = malloc(sizeof(struct Indices));
+// Compute RLEDates and return it, using a counting sort.
+// Also populate RLEDatesCardinality.
+// We cannot pass RLEDates as parameter as well because the compiler complains.
+struct RLEDate* computeRLEDatesCountingSort(struct Database* db, size_t maximum,
+                                            size_t* RLEDatesCardinality) {
+  int* frequencyCount = malloc((maximum + 1) * sizeof(int));
+  // Initialize frequencies to zero.
+  for (size_t i = 0; i <= (size_t)maximum; i++) {
+    frequencyCount[i] = 0;
+  }
+  // Count frequencies, and how many different values are there.
+  size_t different = 0;
+  for (size_t i = 0; i < db->itemsCardinality; i++) {
+    different += frequencyCount[db->items[i].salesDate] == 0;
+    frequencyCount[db->items[i].salesDate]++;
+  }
 
-  // Create indexes for query 2.
-  // Observation: usually there are many repeated dates, which means that using
-  // a Run-Length-Encoding with Length Prefix Summing should help compressing
-  // the data a lot.
-  int orderedItemSalesDate[db->itemsCardinality];
+  // Compute Run-Length-Encoding with Length Prefix Summing.
+  struct RLEDate* RLEDates = malloc(different * sizeof(struct RLEDate));
+  size_t RLEIndex = 0;
+  int prefixCount = 0;
+  for (size_t i = 0; i <= (size_t)maximum; i++) {
+    if (frequencyCount[i] > 0) {
+      prefixCount += frequencyCount[i];
+      RLEDates[RLEIndex].date = i;
+      RLEDates[RLEIndex].prefixCount = prefixCount;
+      RLEIndex++;
+    }
+  }
+  free(frequencyCount);
+
+  *RLEDatesCardinality = different;  // == RLEIndex.
+  return RLEDates;
+}
+
+// Compute RLEDates and return it, using the stdlib sort.
+// Also populate RLEDatesCardinality.
+// We cannot pass RLEDates as parameter as well because the compiler complains.
+struct RLEDate* computeRLEDatesQSort(struct Database* db,
+                                     size_t* RLEDatesCardinality) {
+  int* orderedItemSalesDate = malloc(db->itemsCardinality * sizeof(int));
+  // Etract dates.
   for (size_t i = 0; i < db->itemsCardinality; i++) {
     orderedItemSalesDate[i] = db->items[i].salesDate;
   }
-  // FIXME: Slow!!
+  // Sort dates.
   qsort(orderedItemSalesDate, db->itemsCardinality, sizeof(int), compare);
 
   // Find how many different elements are there.
@@ -338,8 +370,49 @@ void CreateIndices(struct Database* db) {
   // Add last elements.
   RLEDates[RLEIndex].date = orderedItemSalesDate[db->itemsCardinality - 1];
   RLEDates[RLEIndex].prefixCount = db->itemsCardinality;
-  indices->RLEDates = RLEDates;
-  indices->RLEDatesCardinality = RLEIndex + 1;
+
+  free(orderedItemSalesDate);
+
+  *RLEDatesCardinality = different;  // == RLEIndex + 1.
+  return RLEDates;
+}
+
+void CreateIndices(struct Database* db) {
+  struct Indices* indices = malloc(sizeof(struct Indices));
+
+  {
+    // Create indexes for query 2.
+    // Observation: usually there are many repeated dates, which means that
+    // using a Run-Length-Encoding with Length Prefix Summing should help
+    // compressing the data a lot.
+
+    // Find out about how sparse the values are in order to use the appropriate
+    // sorting function.
+    int minimum = __INT_MAX__;
+    int maximum = -1;
+    for (size_t i = 0; i < db->itemsCardinality; i++) {
+      if (db->items[i].salesDate < minimum) {
+        minimum = db->items[i].salesDate;
+      }
+      if (db->items[i].salesDate > maximum) {
+        maximum = db->items[i].salesDate;
+      }
+    }
+
+    size_t RLEDatesCardinality;
+    struct RLEDate* RLEDates;
+
+    if ((size_t)(maximum - minimum) < db->itemsCardinality) {
+      // Data are not very sparse, it makes sense to use counting sort.
+      RLEDates = computeRLEDatesCountingSort(db, maximum, &RLEDatesCardinality);
+    } else {
+      // Use normal sort from stdlib.
+      RLEDates = computeRLEDatesQSort(db, &RLEDatesCardinality);
+    }
+
+    indices->RLEDates = RLEDates;
+    indices->RLEDatesCardinality = RLEDatesCardinality;
+  }
 
   db->indices = indices;
 }
