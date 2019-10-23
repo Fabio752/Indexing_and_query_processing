@@ -34,17 +34,19 @@ struct Indices {
 };
 
 // TODO: improve has function to something better (search online).
-int hash(int value, int size) { return value % size; }
+inline int hash(int value, int size) { return value % size; }
 
-int hash2(int value, int size) { return (2 * value) % size; }
+inline int hash2(int value, int size) { return (2 * value) % size; }
 
-int nextSlotLinear(int currentSlot, int size) {
+inline int nextSlotLinear(int currentSlot, int size) {
   return (currentSlot + 1) % size;
 }
-int nextSlotExpo(int currentSlot, int size, int backOff) {
+
+inline int nextSlotExpo(int currentSlot, int size, int backOff) {
   return (currentSlot + backOff) % size;
 }
-int nextSlotRehashed(int currentSlot, int size, int root) {
+
+inline int nextSlotRehashed(int currentSlot, int size, int root) {
   if (currentSlot == 0) return root;
   return (currentSlot * root) % size;
 }
