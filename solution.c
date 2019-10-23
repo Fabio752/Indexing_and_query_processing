@@ -16,6 +16,7 @@ struct HashTableSlot {
   bool isOccupied;
   int salesDate;
   int employee;
+  int employeeManagerID;
 };
 
 struct StoresHashTableSlot {
@@ -26,10 +27,16 @@ struct StoresHashTableSlot {
 struct Indices {
   struct RLEDate* RLEDates;
   size_t RLEDatesCardinality;
+
+  struct HashTableSlot* ordersHashTable;
+  int* primitiveRoots;
+  size_t* primitiveSizes;
 };
 
 // TODO: improve has function to something better (search online).
 int hash(int value, int size) { return value % size; }
+
+int hash2(int value, int size) { return (2 * value) % size; }
 
 int nextSlotLinear(int currentSlot, int size) {
   return (currentSlot + 1) % size;
@@ -37,8 +44,10 @@ int nextSlotLinear(int currentSlot, int size) {
 int nextSlotExpo(int currentSlot, int size, int backOff) {
   return (currentSlot + backOff) % size;
 }
-int nextSlotRehashed(int currentSlot, int size) {
-  return ((currentSlot + 37) / 3 * 15) % size;
+int nextSlotRehashed(int currentSlot, int size, int root) {
+  if(currentSlot == 0)
+    return root;
+  return (currentSlot * root) % size;
 }
 
 int Query1(struct Database* db, int managerID, int price) {
@@ -182,41 +191,32 @@ int Query3(struct Database* db, int countryID) {
   // Build Items hash table.
   // TODO: implement partitioning.
   // TODO: change size of hash table.
-  size_t size = db->itemsCardinality * 2;
-  struct HashTableSlot hashTableItems[size];
-  
-  // TODO: find a way to remove this horrible hack.
-  // Initialize all slots to be empty. Slow.
-  for (size_t i = 0; i < size; i++) {
-    hashTableItems[i].isOccupied = false;
-  }
-  clock_t start = clock();
-  int conflictsCount = 0;
-  int backOff = 1;
-  int conflicts = 0;
-  
-  for (size_t i = 0; i < db->itemsCardinality; i++) {
-    struct ItemTuple* buildInput = &db->items[i];
-    int hashValue = hash(buildInput->salesDate, size);
-    while (hashTableItems[hashValue].isOccupied) {
-      // hashValue = nextSlotLinear(hashValue, size);
-      hashValue = nextSlotExpo(hashValue, size, backOff);
-      // hashValue = nextSlotRehashed(hashValue, size);
-      backOff = backOff + conflicts;
-      conflicts++;
-      printf("backoff = %d\n", backOff);
-    }
-    conflictsCount = conflictsCount + conflicts;
-    hashTableItems[hashValue].isOccupied = true;
-    hashTableItems[hashValue].salesDate = buildInput->salesDate;
-    hashTableItems[hashValue].employee = buildInput->employee;
-    backOff = 1;
-    conflicts = 0;
-  }
-  double time_taken = (clock() - start) / 1000000.0; 
-  time_taken = time_taken; // Because it gives a warning if not used.
-  printf("building hash table hashTableItems in sec: %f\n", time_taken);
-  printf("items conflicts: %d\n", conflictsCount);
+  struct Indices* indices = db->indices;
+  struct HashTableSlot* hashTableOrders = indices->ordersHashTable;
+  size_t size = 0;
+  int root = 0;
+  root = root;
+  switch(db->ordersCardinality){
+    case 256:
+      size = indices->primitiveSizes[0];
+      root = indices->primitiveRoots[0];
+      break; 
+    case 1024:
+      size = indices->primitiveSizes[1];
+      root = indices->primitiveRoots[1];
+      break; 
+    case 8192:
+      size = indices->primitiveSizes[2];
+      root = indices->primitiveRoots[2];
+      break; 
+    case 65536:
+      size = indices->primitiveSizes[3];
+      root = indices->primitiveRoots[3];
+      break; 
+    default:
+      size = indices->primitiveSizes[4];
+      root = indices->primitiveRoots[4]; 
+  } 
 
   // Build Stores hash table.
   size_t sizeStores = db->storesCardinality + 1;
@@ -226,11 +226,8 @@ int Query3(struct Database* db, int countryID) {
   for (size_t i = 0; i < sizeStores; i++) {
     hashTableStores[i].isOccupied = false;
   }
-  start = clock();
   
-  conflictsCount = 0;
-  
-  // Build hash table.
+  // Populate Store hash table.
   for (size_t i = 0; i < db->storesCardinality; i++) {
     struct StoreTuple* buildInput = &db->stores[i];
     if (buildInput->countryID != countryID) {
@@ -238,63 +235,54 @@ int Query3(struct Database* db, int countryID) {
     }
     int hashValue = hash(buildInput->managerID, sizeStores);
     while (hashTableStores[hashValue].isOccupied) {
-      // hashValue = nextSlotLinear(hashValue, sizeStores);
-      hashValue = nextSlotExpo(hashValue, sizeStores, backOff);
+      hashValue = nextSlotLinear(hashValue, sizeStores);
+      // hashValue = nextSlotExpo(hashValue, sizeStores, backOff);
       // hashValue = nextSlotRehashed(hashValue, sizeStores);
-      backOff = backOff + conflicts;
-      conflicts++;
-      printf("backoff = %d\n", backOff);
     }
-    conflictsCount = conflictsCount + conflicts;
     hashTableStores[hashValue].isOccupied = true;
     hashTableStores[hashValue].managerID = buildInput->managerID;
-    backOff = 1;
-    conflicts = 0;
   }
-  time_taken = (clock() - start) / 1000000.0;
-  // printf("building hash table hashTableStores in sec: %f\n", time_taken);
-  // printf("stores conflicts: %d\n", conflictsCount);
 
   // Count tuples.
   int tupleCount = 0;
 
-  for (size_t i = 0; i < db->ordersCardinality; i++) {
-    struct OrderTuple* probeInput = &db->orders[i];
-    int hashValue = hash(probeInput->salesDate, size);
-    int backOffOrders = 1;
-    int conflictsOrders = 0;
-    while (hashTableItems[hashValue].isOccupied) {
+
+  for (size_t i = 0; i < db->itemsCardinality; i++) {
+    struct ItemTuple* probeInput = &db->items[i];
+    int hashValue = hash(probeInput->salesDate * probeInput->employee, size);
+    // int backOffOrders = 1;
+    // int conflictsOrders = 0;
+    while (hashTableOrders[hashValue].isOccupied) {
       // Keep on going even if we find a match because there could be
       // duplicates.
-      if (hashTableItems[hashValue].salesDate == probeInput->salesDate &&
-          hashTableItems[hashValue].employee == probeInput->employee) {
-        int hashValueStores = hash(probeInput->employeeManagerID, sizeStores);
-        int backOffStores = 1;
-        int conflictsStores = 0;
+
+      if (hashTableOrders[hashValue].salesDate == probeInput->salesDate &&
+          hashTableOrders[hashValue].employee == probeInput->employee) {
+        int hashValueStores = hash(hashTableOrders[hashValue].employeeManagerID, sizeStores);
+        // int conflictsStores = 0;
         while (hashTableStores[hashValueStores].isOccupied) {
           if (hashTableStores[hashValueStores].managerID ==
-              probeInput->employeeManagerID) {
+              hashTableOrders[hashValue].employeeManagerID) {
             tupleCount++;
           }
-          // hashValueStores = nextSlotLinear(hashValueStores, sizeStores);
-          hashValueStores = nextSlotExpo(hashValueStores, sizeStores, backOffStores);
+          hashValueStores = nextSlotLinear(hashValueStores, sizeStores);
+          // hashValueStores = nextSlotExpo(hashValueStores, sizeStores, backOffStores);
           // hashValueStores = nextSlotRehashed(hashValueStores, sizeStores);
-          backOffStores = backOffStores + conflictsStores;
-          conflictsStores++;
+          // conflictsStores++;
         }
-        conflictsCount = conflictsCount + conflictsStores;
-        conflictsStores = 0;
       }
-      // hashValue = nextSlotLinear(hashValue, size);
-      hashValue = nextSlotExpo(hashValue, size, backOffOrders);
-      // hashValue = nextSlotRehashed(hashValue, size);
-      backOffOrders = backOffOrders + conflictsOrders;
-      conflictsOrders++;
+
+      hashValue = nextSlotLinear(hashValue, size);
+      // hashValue = nextSlotExpo(hashValue, size, backOffOrders);
+      // hashValue = nextSlotRehashed(hashValue, size, root);
+
+      // backOffOrders = backOffOrders + conflictsOrders;
+      // conflictsOrders++;
     }
-    conflictsCount = conflictsCount + conflictsOrders;
-    conflictsOrders = 0;
+    // conflictsCount = conflictsCount + conflictsOrders;
+    // conflictsOrders = 0;
   }
-  printf("PROBE conflicts: %d\n", conflictsCount);
+  // printf("PROBE conflicts: %d\n", conflictsCount);
 
   return tupleCount;
 }
@@ -304,6 +292,8 @@ int Query3(struct Database* db, int countryID) {
 int compare(const void* a, const void* b) { return *(int*)a - *(int*)b; }
 
 void CreateIndices(struct Database* db) {
+  // printf("ietms: %ld, orders: %ld, store: %ld\n", db->itemsCardinality, db->ordersCardinality, db->storesCardinality);
+
   struct Indices* indices = malloc(sizeof(struct Indices));
 
   // Create indexes for query 2.
@@ -341,6 +331,77 @@ void CreateIndices(struct Database* db) {
   indices->RLEDates = RLEDates;
   indices->RLEDatesCardinality = RLEIndex + 1;
 
+  // Create indices Order Hash Table for query 1 and 3.
+  size_t size = 0;
+  int root = 0;
+  root = root;
+  int* primitiveRoots = malloc(5 * sizeof(int));
+  size_t* primitiveSizes = malloc(5* sizeof(size_t));
+  primitiveRoots[0] = 7;
+  primitiveRoots[1] = 6;
+  primitiveRoots[2] = 17;
+  primitiveRoots[3] = 11;
+  primitiveRoots[4] = 11;
+  primitiveSizes[0] = 514;
+  primitiveSizes[1] = 2053;
+  primitiveSizes[2] = 16538;
+  primitiveSizes[3] = 131074;
+  primitiveSizes[4] = 524287;
+
+  indices->primitiveRoots = primitiveRoots;
+  indices->primitiveSizes = primitiveSizes;
+
+  switch(db->ordersCardinality){
+    case 256:
+      size = primitiveSizes[0];
+      root = primitiveRoots[0];
+      break; 
+    case 1024:
+      size = primitiveSizes[1];
+      root = primitiveRoots[1];
+      break; 
+    case 8192:
+      size = primitiveSizes[2];
+      root = primitiveRoots[2];
+      break; 
+    case 65536:
+      size = primitiveSizes[3];
+      root = primitiveRoots[3];
+      break; 
+    default:
+      size = primitiveSizes[4];
+      root = primitiveRoots[4]; 
+  } 
+  struct HashTableSlot* hashTableOrders = malloc(size * sizeof(struct HashTableSlot));
+  indices->ordersHashTable = &hashTableOrders[0];
+  size_t conflicts = 0;
+
+
+  // TODO: find a way to remove this horrible hack.
+  // Initialize all slots to be empty. Slow.
+  for (size_t i = 0; i < size; i++) {
+    hashTableOrders[i].isOccupied = false;
+  }
+  for (size_t i = 0; i < db->ordersCardinality; i++) {
+    struct OrderTuple* buildInput = &db->orders[i];
+    int hashValue = hash(buildInput->salesDate * buildInput->employee, size);
+    while (hashTableOrders[hashValue].isOccupied) {
+      hashValue = nextSlotLinear(hashValue, size);
+      // hashValue = nextSlotExpo(hashValue, size, backOff);
+      // hashValue = nextSlotRehashed(hashValue, size, root);
+      // backOff = backOff + conflicts;
+      conflicts++;
+    }
+    // conflictsCount = conflictsCount + conflicts;
+    hashTableOrders[hashValue].isOccupied = true;
+    hashTableOrders[hashValue].salesDate = buildInput->salesDate;
+    hashTableOrders[hashValue].employee = buildInput->employee;
+    hashTableOrders[hashValue].employeeManagerID = buildInput->employeeManagerID;
+    
+    // backOff = 1;
+    // conflicts = 0;
+  }
+  // printf("orders conflicts: %ld\n", conflicts);
   db->indices = indices;
 }
 
@@ -348,6 +409,9 @@ void DestroyIndices(struct Database* db) {
   /// Free database indices
   struct Indices* indices = db->indices;
   free(indices->RLEDates);
+  free(indices->primitiveRoots);
+  free(indices->primitiveSizes);
+  free(indices->ordersHashTable);
   free(indices);
   db->indices = NULL;
 }
