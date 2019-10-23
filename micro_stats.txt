@@ -23,25 +23,25 @@ Query1Benchmark/1048576             47826 us        47825 us           15
 Let's keep our results separate, since our machines are different.
 
 Benchmark results Marco
-CreateIndicesBenchmark/1024          2.28 us         2.29 us       287797
-CreateIndicesBenchmark/4096           235 us          235 us         2984
-CreateIndicesBenchmark/32768         51.5 us         51.6 us        12834
-CreateIndicesBenchmark/262144         456 us          456 us         1472
-CreateIndicesBenchmark/1048576       2470 us         2470 us          289
-Query1Benchmark/1024                 54.0 us         53.9 us        12469
-Query1Benchmark/4096                  222 us          222 us         3197
-Query1Benchmark/32768                1749 us         1749 us          392
-Query1Benchmark/262144              15047 us        15046 us           48
-Query1Benchmark/1048576             62203 us        62202 us           12
-Query2Benchmark/1024                 2.12 us         2.12 us       321005
-Query2Benchmark/4096                 8.87 us         8.87 us        74298
-Query2Benchmark/32768                64.6 us         64.6 us        10168
-Query2Benchmark/262144                361 us          359 us         1945
-Query2Benchmark/524288                700 us          700 us         1027
-Query3Benchmark/1024                0.227 us        0.226 us      3253308
-Query3Benchmark/4096                0.222 us        0.222 us      2431691
-Query3Benchmark/32768               0.224 us        0.223 us      3158785
-Query3Benchmark/262144              0.220 us        0.220 us      3198844
+CreateIndicesBenchmark/1024          13.2 us         13.1 us        44131
+CreateIndicesBenchmark/4096           285 us          283 us         2467
+CreateIndicesBenchmark/32768          342 us          341 us         2059
+CreateIndicesBenchmark/262144        3376 us         3358 us          201
+CreateIndicesBenchmark/1048576      22823 us        22652 us           31
+Query1Benchmark/1024                 54.9 us         54.6 us        11318
+Query1Benchmark/4096                  222 us          221 us         3163
+Query1Benchmark/32768                1775 us         1765 us          373
+Query1Benchmark/262144              15260 us        15165 us           47
+Query1Benchmark/1048576             63899 us        63555 us           11
+Query2Benchmark/1024                 2.19 us         2.18 us       328072
+Query2Benchmark/4096                 8.89 us         8.85 us        76595
+Query2Benchmark/32768                66.3 us         66.0 us        10048
+Query2Benchmark/262144                354 us          353 us         1969
+Query2Benchmark/524288                705 us          700 us         1013
+Query3Benchmark/1024                 2071 us         2061 us          335
+Query3Benchmark/4096                 6005 us         5974 us          115
+Query3Benchmark/32768               37231 us        37042 us           19
+Query3Benchmark/262144             304375 us       302452 us            2
 
 
 Benchmark results Fabio
