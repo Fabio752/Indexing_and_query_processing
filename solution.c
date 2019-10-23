@@ -26,6 +26,7 @@ struct StoresHashTableSlot {
 struct Indices {
   struct RLEDate* RLEDates;
   size_t RLEDatesCardinality;
+  bool RLEDatesIsDense;
 };
 
 // TODO: improve has function to something better (search online).
@@ -117,7 +118,7 @@ int Query2(struct Database* db, int discount, int date) {
   // iterate through orders and binary search inside items how many
   // orders have been placed in the the relevant period.
   // Complexity:
-  // - time: O(orders * log(items))
+  // - time: O(orders * log(items))  [ O(orders) if items.salesDate are dense ]
   // - space: O(1)
   //
   // Preprocessing:
@@ -132,13 +133,28 @@ int Query2(struct Database* db, int discount, int date) {
       continue;
     }
     int orderDate = db->orders[i].salesDate;
+    int earliestOrderDate = orderDate - date;
+
+    if (indices->RLEDatesIsDense) {
+      // If the data are dense, there is no need to binary search.
+      size_t leftIdx = earliestOrderDate - indices->RLEDates[0].date - 1;
+      leftIdx = (int)leftIdx < 0 ? 0 : leftIdx; // No negative values.
+      leftIdx = leftIdx >= indices->RLEDatesCardinality ? indices->RLEDatesCardinality - 1 : leftIdx; // No out of bound results.
+
+      size_t rightIdx = orderDate - indices->RLEDates[0].date;
+      rightIdx = (int)rightIdx < 0 ? 0 : rightIdx; // No negative values.
+      rightIdx = rightIdx >= indices->RLEDatesCardinality ? indices->RLEDatesCardinality - 1 : rightIdx; // No out of bound results.
+
+      tuplesCount += indices->RLEDates[rightIdx].date - indices->RLEDates[leftIdx].date;
+      continue;
+    }
+
     // Binary search the lower bound. Find the smallest date
     // >= orderDate - date.
-    int target = orderDate - date;
     size_t lb = 0, ub = RLEDatesCardinality;
     while (lb < ub) {
       size_t mid = (lb + ub) >> 1;
-      if (target <= indices->RLEDates[mid].date) {
+      if (earliestOrderDate <= indices->RLEDates[mid].date) {
         ub = mid;
       } else {
         lb = mid + 1;
@@ -204,7 +220,7 @@ int Query3(struct Database* db, int countryID) {
       // hashValue = nextSlotRehashed(hashValue, size);
       backOff = backOff + conflicts;
       conflicts++;
-      printf("backoff = %d\n", backOff);
+      //printf("backoff = %d\n", backOff);
     }
     conflictsCount = conflictsCount + conflicts;
     hashTableItems[hashValue].isOccupied = true;
@@ -243,7 +259,7 @@ int Query3(struct Database* db, int countryID) {
       // hashValue = nextSlotRehashed(hashValue, sizeStores);
       backOff = backOff + conflicts;
       conflicts++;
-      printf("backoff = %d\n", backOff);
+      //printf("backoff = %d\n", backOff);
     }
     conflictsCount = conflictsCount + conflicts;
     hashTableStores[hashValue].isOccupied = true;
@@ -310,7 +326,7 @@ void CreateIndices(struct Database* db) {
   // Observation: usually there are many repeated dates, which means that using
   // a Run-Length-Encoding with Length Prefix Summing should help compressing
   // the data a lot.
-  int orderedItemSalesDate[db->itemsCardinality];
+  int* orderedItemSalesDate = malloc(db->itemsCardinality * sizeof(int));
   for (size_t i = 0; i < db->itemsCardinality; i++) {
     orderedItemSalesDate[i] = db->items[i].salesDate;
   }
@@ -319,9 +335,11 @@ void CreateIndices(struct Database* db) {
 
   // Find how many different elements are there.
   size_t different = 1;
+  bool isDense = true;
   for (size_t i = 1; i < db->itemsCardinality; i++) {
     if (orderedItemSalesDate[i] > orderedItemSalesDate[i - 1]) {
       different++;
+      isDense &= orderedItemSalesDate[i] == orderedItemSalesDate[i - 1];
     }
   }
 
@@ -340,6 +358,9 @@ void CreateIndices(struct Database* db) {
   RLEDates[RLEIndex].prefixCount = db->itemsCardinality;
   indices->RLEDates = RLEDates;
   indices->RLEDatesCardinality = RLEIndex + 1;
+  indices->RLEDatesIsDense = isDense;
+
+  free(orderedItemSalesDate);
 
   db->indices = indices;
 }
