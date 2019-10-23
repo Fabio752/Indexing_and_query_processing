@@ -129,7 +129,7 @@ int Query2(struct Database* db, int discount, int date) {
   // - space: O(1)
   //
   // Preprocessing:
-  // - time: O(items * log(items))
+  // - time: O(items * log(items)) [ or O(items) with counting sort ]
   // - space: O(items)
   struct Indices* indices = db->indices;
   size_t RLEDatesCardinality = indices->RLEDatesCardinality;
