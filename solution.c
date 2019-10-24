@@ -29,8 +29,9 @@ struct Indices {
   size_t RLEDatesCardinality;
 
   struct HashTableSlot* ordersHashTable;
-  int* primitiveRoots;
-  size_t* primitiveSizes;
+  // int* primitiveRoots;
+  // size_t* primitiveSizes;
+  int orderCardinality;
 };
 
 // TODO: improve has function to something better (search online).
@@ -193,30 +194,30 @@ int Query3(struct Database* db, int countryID) {
   // TODO: change size of hash table.
   struct Indices* indices = db->indices;
   struct HashTableSlot* hashTableOrders = indices->ordersHashTable;
-  size_t size = 0;
-  int root = 0;
-  root = root;
-  switch(db->ordersCardinality){
-    case 256:
-      size = indices->primitiveSizes[0];
-      root = indices->primitiveRoots[0];
-      break; 
-    case 1024:
-      size = indices->primitiveSizes[1];
-      root = indices->primitiveRoots[1];
-      break; 
-    case 8192:
-      size = indices->primitiveSizes[2];
-      root = indices->primitiveRoots[2];
-      break; 
-    case 65536:
-      size = indices->primitiveSizes[3];
-      root = indices->primitiveRoots[3];
-      break; 
-    default:
-      size = indices->primitiveSizes[4];
-      root = indices->primitiveRoots[4]; 
-  } 
+  size_t size = indices->orderCardinality;
+  // int root = 0;
+  // root = root;
+  // switch(db->ordersCardinality){
+  //   case 256:
+  //     size = indices->primitiveSizes[0];
+  //     root = indices->primitiveRoots[0];
+  //     break; 
+  //   case 1024:
+  //     size = indices->primitiveSizes[1];
+  //     root = indices->primitiveRoots[1];
+  //     break; 
+  //   case 8192:
+  //     size = indices->primitiveSizes[2];
+  //     root = indices->primitiveRoots[2];
+  //     break; 
+  //   case 65536:
+  //     size = indices->primitiveSizes[3];
+  //     root = indices->primitiveRoots[3];
+  //     break; 
+  //   default:
+  //     size = indices->primitiveSizes[4];
+  //     root = indices->primitiveRoots[4]; 
+  // } 
 
   // Build Stores hash table.
   size_t sizeStores = db->storesCardinality + 1;
@@ -332,46 +333,47 @@ void CreateIndices(struct Database* db) {
   indices->RLEDatesCardinality = RLEIndex + 1;
 
   // Create indices Order Hash Table for query 1 and 3.
-  size_t size = 0;
-  int root = 0;
-  root = root;
-  int* primitiveRoots = malloc(5 * sizeof(int));
-  size_t* primitiveSizes = malloc(5* sizeof(size_t));
-  primitiveRoots[0] = 7;
-  primitiveRoots[1] = 6;
-  primitiveRoots[2] = 17;
-  primitiveRoots[3] = 11;
-  primitiveRoots[4] = 11;
-  primitiveSizes[0] = 514;
-  primitiveSizes[1] = 2053;
-  primitiveSizes[2] = 16538;
-  primitiveSizes[3] = 131074;
-  primitiveSizes[4] = 524287;
+  size_t size = db->ordersCardinality * 2;
+  indices->orderCardinality = size;
+  // int root = 0;
+  // root = root;
+  // int* primitiveRoots = malloc(5 * sizeof(int));
+  // size_t* primitiveSizes = malloc(5* sizeof(size_t));
+  // primitiveRoots[0] = 7;
+  // primitiveRoots[1] = 6;
+  // primitiveRoots[2] = 17;
+  // primitiveRoots[3] = 11;
+  // primitiveRoots[4] = 11;
+  // primitiveSizes[0] = 514;
+  // primitiveSizes[1] = 2053;
+  // primitiveSizes[2] = 16538;
+  // primitiveSizes[3] = 131074;
+  // primitiveSizes[4] = 524287;
 
-  indices->primitiveRoots = primitiveRoots;
-  indices->primitiveSizes = primitiveSizes;
+  // indices->primitiveRoots = primitiveRoots;
+  // indices->primitiveSizes = primitiveSizes;
 
-  switch(db->ordersCardinality){
-    case 256:
-      size = primitiveSizes[0];
-      root = primitiveRoots[0];
-      break; 
-    case 1024:
-      size = primitiveSizes[1];
-      root = primitiveRoots[1];
-      break; 
-    case 8192:
-      size = primitiveSizes[2];
-      root = primitiveRoots[2];
-      break; 
-    case 65536:
-      size = primitiveSizes[3];
-      root = primitiveRoots[3];
-      break; 
-    default:
-      size = primitiveSizes[4];
-      root = primitiveRoots[4]; 
-  } 
+  // switch(db->ordersCardinality){
+  //   case 256:
+  //     size = primitiveSizes[0];
+  //     root = primitiveRoots[0];
+  //     break; 
+  //   case 1024:
+  //     size = primitiveSizes[1];
+  //     root = primitiveRoots[1];
+  //     break; 
+  //   case 8192:
+  //     size = primitiveSizes[2];
+  //     root = primitiveRoots[2];
+  //     break; 
+  //   case 65536:
+  //     size = primitiveSizes[3];
+  //     root = primitiveRoots[3];
+  //     break; 
+  //   default:
+  //     size = primitiveSizes[4];
+  //     root = primitiveRoots[4]; 
+  // } 
   struct HashTableSlot* hashTableOrders = malloc(size * sizeof(struct HashTableSlot));
   indices->ordersHashTable = &hashTableOrders[0];
   size_t conflicts = 0;
@@ -409,8 +411,8 @@ void DestroyIndices(struct Database* db) {
   /// Free database indices
   struct Indices* indices = db->indices;
   free(indices->RLEDates);
-  free(indices->primitiveRoots);
-  free(indices->primitiveSizes);
+  // free(indices->primitiveRoots);
+  // free(indices->primitiveSizes);
   free(indices->ordersHashTable);
   free(indices);
   db->indices = NULL;
