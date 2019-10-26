@@ -12,11 +12,10 @@ struct RLEDate {
   int prefixCount;
 };
 
-struct HashTableSlot {
+struct OrdersHashTableSlot {
   bool isOccupied;
   int salesDate;
   int employee;
-  int employeeManagerID;
 };
 
 struct StoresHashTableSlot {
@@ -24,14 +23,19 @@ struct StoresHashTableSlot {
   int managerID;
 };
 
+struct SalesDateEmployeeToCount {
+  bool isOccupied;
+  int salesDate;
+  int employee;
+  int count;
+};
+
 struct Indices {
   struct RLEDate* RLEDates;
   size_t RLEDatesCardinality;
 
-  struct HashTableSlot* ordersHashTable;
-  // int* primitiveRoots;
-  // size_t* primitiveSizes;
-  int orderCardinality;
+  struct SalesDateEmployeeToCount* salesDateEmployeeToCountHT;
+  size_t salesDateEmployeeToCountCardinality;
 };
 
 // TODO: improve has function to something better (search online).
@@ -53,39 +57,56 @@ int nextSlotRehashed(int currentSlot, int size, int root) {
 }
 
 int Query1(struct Database* db, int managerID, int price) {
-  // TODO: implement partitioning.
-  // TODO: change size of hash table.
-  struct Indices* indices = db->indices;
-  struct HashTableSlot* hashTableOrders = indices->ordersHashTable;
-  size_t size = indices->orderCardinality;
-  // int conflicts = 0;
+  // TODO: use some indexing to speed this up. E.g. maybe sort items by price?
+  // E.g. maybe prebuild ordersHashTableSize?
+  size_t ordersHashTableSize = db->ordersCardinality + 1;
+  struct OrdersHashTableSlot* ordersHashTable =
+      malloc(ordersHashTableSize * sizeof(struct OrdersHashTableSlot));
 
-  // Count matching tuples.
-  int tuplesCount = 0;
-  for (size_t i = 0; i < db->itemsCardinality; i++) {
-    struct ItemTuple* probeInput = &db->items[i];
-    if (probeInput->price >= price) {
+  // TODO: find a way to remove this horrible hack.
+  // Initialize all slots to be empty. Slow.
+  for (size_t i = 0; i < ordersHashTableSize; i++) {
+    ordersHashTable[i].isOccupied = false;
+  }
+
+  // Build orders hash table.
+  for (size_t i = 0; i < db->ordersCardinality; i++) {
+    struct OrderTuple* orderTuple = &db->orders[i];
+    if (orderTuple->employeeManagerID != managerID) {
       continue;
     }
-    int hashValue = hash(probeInput->salesDate * probeInput->employee, size);
-    while (hashTableOrders[hashValue].isOccupied) {
-      // Keep on going even if we find a match because there could be
-      // duplicates.
-      if (hashTableOrders[hashValue].salesDate == probeInput->salesDate &&
-          hashTableOrders[hashValue].employee == probeInput->employee &&
-          managerID == hashTableOrders[hashValue].employeeManagerID) {
-        tuplesCount++;
-      }
-      hashValue = nextSlotLinear(hashValue, size);
-      // hashValue = nextSlotExpo(hashValue, size, backOff);
-      // hashValue = nextSlotRehashed(hashValue, size);
-      // backOff = backOff * 2;
+    int hashValue =
+        hash(orderTuple->salesDate * orderTuple->employee, ordersHashTableSize);
+    while (ordersHashTable[hashValue].isOccupied) {
+      hashValue = nextSlotLinear(hashValue, ordersHashTableSize);
     }
-    // backOff = 1;
+    ordersHashTable[hashValue].isOccupied = true;
+    ordersHashTable[hashValue].salesDate = orderTuple->salesDate;
+    ordersHashTable[hashValue].employee = orderTuple->employee;
   }
-  // printf("PROBE conflicts: %d\n", conflicts);
 
-  return tuplesCount;
+  // Count matching tuples.
+  int tupleCount = 0;
+  for (size_t i = 0; i < db->itemsCardinality; i++) {
+    if (db->items[i].price >= price) {
+      continue;
+    }
+    struct ItemTuple* itemTuple = &db->items[i];
+
+    int hashValue =
+        hash(itemTuple->salesDate * itemTuple->employee, ordersHashTableSize);
+    while (ordersHashTable[hashValue].isOccupied) {
+      if (ordersHashTable[hashValue].salesDate == itemTuple->salesDate &&
+          ordersHashTable[hashValue].employee == itemTuple->employee) {
+        tupleCount++;
+      }
+      hashValue = nextSlotLinear(hashValue, ordersHashTableSize);
+    }
+  }
+
+  free(ordersHashTable);
+
+  return tupleCount;
 }
 
 int Query2(struct Database* db, int discount, int date) {
@@ -155,35 +176,11 @@ int Query2(struct Database* db, int discount, int date) {
 }
 
 int Query3(struct Database* db, int countryID) {
-  // Build Items hash table.
-  // TODO: implement partitioning.
-  // TODO: change size of hash table.
   struct Indices* indices = db->indices;
-  struct HashTableSlot* hashTableOrders = indices->ordersHashTable;
-  size_t size = indices->orderCardinality;
-  // int root = 0;
-  // root = root;
-  // switch(db->ordersCardinality){
-  //   case 256:
-  //     size = indices->primitiveSizes[0];
-  //     root = indices->primitiveRoots[0];
-  //     break; 
-  //   case 1024:
-  //     size = indices->primitiveSizes[1];
-  //     root = indices->primitiveRoots[1];
-  //     break; 
-  //   case 8192:
-  //     size = indices->primitiveSizes[2];
-  //     root = indices->primitiveRoots[2];
-  //     break; 
-  //   case 65536:
-  //     size = indices->primitiveSizes[3];
-  //     root = indices->primitiveRoots[3];
-  //     break; 
-  //   default:
-  //     size = indices->primitiveSizes[4];
-  //     root = indices->primitiveRoots[4]; 
-  // } 
+  struct SalesDateEmployeeToCount* salesDateEmployeeToCountHT =
+      indices->salesDateEmployeeToCountHT;
+  size_t salesDateEmployeeToCountCardinality =
+      indices->salesDateEmployeeToCountCardinality;
 
   // Build Stores hash table.
   size_t sizeStores = db->storesCardinality + 1;
@@ -193,7 +190,6 @@ int Query3(struct Database* db, int countryID) {
   for (size_t i = 0; i < sizeStores; i++) {
     hashTableStores[i].isOccupied = false;
   }
-
   // Populate Store hash table.
   for (size_t i = 0; i < db->storesCardinality; i++) {
     struct StoreTuple* buildInput = &db->stores[i];
@@ -213,45 +209,34 @@ int Query3(struct Database* db, int countryID) {
   // Count tuples.
   int tupleCount = 0;
 
-  for (size_t i = 0; i < db->itemsCardinality; i++) {
-    struct ItemTuple* probeInput = &db->items[i];
-    int hashValue = hash(probeInput->salesDate * probeInput->employee, size);
-    // int backOffOrders = 1;
-    // int conflictsOrders = 0;
-    while (hashTableOrders[hashValue].isOccupied) {
-      // Keep on going even if we find a match because there could be
-      // duplicates.
-
-      if (hashTableOrders[hashValue].salesDate == probeInput->salesDate &&
-          hashTableOrders[hashValue].employee == probeInput->employee) {
-        int hashValueStores =
-            hash(hashTableOrders[hashValue].employeeManagerID, sizeStores);
-        // int conflictsStores = 0;
-        while (hashTableStores[hashValueStores].isOccupied) {
-          if (hashTableStores[hashValueStores].managerID ==
-              hashTableOrders[hashValue].employeeManagerID) {
-            tupleCount++;
+  for (size_t i = 0; i < db->ordersCardinality; i++) {
+    struct OrderTuple* orderTuple = &db->orders[i];
+    int hashValueStores = hash(orderTuple->employeeManagerID, sizeStores);
+    while (hashTableStores[hashValueStores].isOccupied) {
+      if (hashTableStores[hashValueStores].managerID ==
+          orderTuple->employeeManagerID) {
+        // Lookup how many items matched this pair (salesDate, employee).
+        int hashValueSalesDateEmployee =
+            hash(orderTuple->salesDate * orderTuple->employee,
+                 salesDateEmployeeToCountCardinality);
+        while (
+            salesDateEmployeeToCountHT[hashValueSalesDateEmployee].isOccupied) {
+          if (salesDateEmployeeToCountHT[hashValueSalesDateEmployee]
+                      .salesDate == orderTuple->salesDate &&
+              salesDateEmployeeToCountHT[hashValueSalesDateEmployee].employee ==
+                  orderTuple->employee) {
+            tupleCount +=
+                salesDateEmployeeToCountHT[hashValueSalesDateEmployee].count;
           }
-          hashValueStores = nextSlotLinear(hashValueStores, sizeStores);
-          // hashValueStores = nextSlotExpo(hashValueStores, sizeStores,
-          // backOffStores); hashValueStores = nextSlotRehashed(hashValueStores,
-          // sizeStores); conflictsStores++;
+          hashValueSalesDateEmployee = nextSlotLinear(
+              hashValueSalesDateEmployee, salesDateEmployeeToCountCardinality);
         }
       }
-
-      hashValue = nextSlotLinear(hashValue, size);
-      // hashValue = nextSlotExpo(hashValue, size, backOffOrders);
-      // hashValue = nextSlotRehashed(hashValue, size, root);
-
-      // backOffOrders = backOffOrders + conflictsOrders;
-      // conflictsOrders++;
+      hashValueStores = nextSlotLinear(hashValueStores, sizeStores);
     }
-    // conflictsCount = conflictsCount + conflictsOrders;
-    // conflictsOrders = 0;
   }
-  // printf("PROBE conflicts: %d\n", conflictsCount);
 
-  return tupleCount;
+  return tupleCount >> 1;
 }
 
 // Comparison function for qsort.
@@ -326,7 +311,7 @@ struct RLEDate* computeRLEDatesQSort(struct Database* db,
   // Add last elements.
   RLEDates[RLEIndex].date = orderedItemSalesDate[db->itemsCardinality - 1];
   RLEDates[RLEIndex].prefixCount = db->itemsCardinality;
-  
+
   free(orderedItemSalesDate);
 
   *RLEDatesCardinality = different;  // == RLEIndex.
@@ -371,80 +356,73 @@ void CreateIndices(struct Database* db) {
   }
 
   {
-    // Create indices Order Hash Table for query 1 and 3.
-    size_t size = db->ordersCardinality * 2;
-    indices->orderCardinality = size;
-    // int root = 0;
-    // root = root;
-    // int* primitiveRoots = malloc(5 * sizeof(int));
-    // size_t* primitiveSizes = malloc(5 * sizeof(size_t));
-    // primitiveRoots[0] = 7;
-    // primitiveRoots[1] = 6;
-    // primitiveRoots[2] = 17;
-    // primitiveRoots[3] = 11;
-    // primitiveRoots[4] = 11;
-    // primitiveSizes[0] = 514;
-    // primitiveSizes[1] = 2053;
-    // primitiveSizes[2] = 16538;
-    // primitiveSizes[3] = 131074;
-    // primitiveSizes[4] = 524287;
+    // TODO: this is weirdly slow.
 
-    // indices->primitiveRoots = primitiveRoots;
-    // indices->primitiveSizes = primitiveSizes;
+    // Q3 indices.
+    // Observations: we know that items.salesDate and items.employee are foreign
+    // keys into orders. We also don't care about price in Q3. Idea: 1)
+    // aggregate items, counting the number of different prices for each pair
+    //    salesDate and employee. This table will have cardinality <=
+    //    ordersCardinality.
+    // 2) join the aggregated items with orders. This table will have
+    //    cardinality <= ordersCardinality.
+    // 3) Use this in Q3.
+    // 4) Win the contest.
+    // (maybe you can do step 1 and 2 together)
 
-    // switch (db->ordersCardinality) {
-    //   case 256:
-    //     size = primitiveSizes[0];
-    //     root = primitiveRoots[0];
-    //     break;
-    //   case 1024:
-    //     size = primitiveSizes[1];
-    //     root = primitiveRoots[1];
-    //     break;
-    //   case 8192:
-    //     size = primitiveSizes[2];
-    //     root = primitiveRoots[2];
-    //     break;
-    //   case 65536:
-    //     size = primitiveSizes[3];
-    //     root = primitiveRoots[3];
-    //     break;
-    //   default:
-    //     size = primitiveSizes[4];
-    //     root = primitiveRoots[4];
-    // }
-    struct HashTableSlot* hashTableOrders =
-        malloc(size * sizeof(struct HashTableSlot));
-    indices->ordersHashTable = &hashTableOrders[0];
-    size_t conflicts = 0;
-
-    // TODO: find a way to remove this horrible hack.
-    // Initialize all slots to be empty. Slow.
-    for (size_t i = 0; i < size; i++) {
-      hashTableOrders[i].isOccupied = false;
+    // Create hash table from the pair (salesDate, employee) to count.
+    // Each pair (salesDate, employee) comes from Orders, and the count is
+    // initially set to zero.
+    // TODO: find out whether salesDate, employee is enough as primary key for
+    // orders. If so, we would have no duplictes in orders, and the lookup would
+    // be simpler.
+    size_t salesDateEmployeeToCountCardinality = db->ordersCardinality * 2;
+    struct SalesDateEmployeeToCount* salesDateEmployeeToCountHT =
+        malloc(salesDateEmployeeToCountCardinality *
+               sizeof(struct SalesDateEmployeeToCount));
+    for (size_t i = 0; i < salesDateEmployeeToCountCardinality; i++) {
+      salesDateEmployeeToCountHT[i].isOccupied = false;
     }
     for (size_t i = 0; i < db->ordersCardinality; i++) {
-      struct OrderTuple* buildInput = &db->orders[i];
-      int hashValue = hash(buildInput->salesDate * buildInput->employee, size);
-      while (hashTableOrders[hashValue].isOccupied) {
-        hashValue = nextSlotLinear(hashValue, size);
-        // hashValue = nextSlotExpo(hashValue, size, backOff);
-        // hashValue = nextSlotRehashed(hashValue, size, root);
-        // backOff = backOff + conflicts;
-        conflicts++;
+      struct OrderTuple* orderTuple = &db->orders[i];
+      int hashValue = hash(orderTuple->salesDate * orderTuple->employee,
+                           salesDateEmployeeToCountCardinality);
+      while (salesDateEmployeeToCountHT[hashValue].isOccupied) {
+        hashValue =
+            nextSlotLinear(hashValue, salesDateEmployeeToCountCardinality);
       }
       // conflictsCount = conflictsCount + conflicts;
-      hashTableOrders[hashValue].isOccupied = true;
-      hashTableOrders[hashValue].salesDate = buildInput->salesDate;
-      hashTableOrders[hashValue].employee = buildInput->employee;
-      hashTableOrders[hashValue].employeeManagerID =
-          buildInput->employeeManagerID;
-
-      // backOff = 1;
-      // conflicts = 0;
+      // TODO: maybe use salesDate..[hashValue] = {true, ....}
+      salesDateEmployeeToCountHT[hashValue].isOccupied = true;
+      salesDateEmployeeToCountHT[hashValue].salesDate = orderTuple->salesDate;
+      salesDateEmployeeToCountHT[hashValue].employee = orderTuple->employee;
+      salesDateEmployeeToCountHT[hashValue].count = 0;
     }
-    // printf("orders conflicts: %ld\n", conflicts);
+
+    // Iterate through items to count how many rows have a particular pair
+    // (salesDate, employee) that can be merged with orders.
+    for (size_t i = 0; i < db->itemsCardinality; i++) {
+      // TODO: change these to copies, not pointers. Maybe goes faster.
+      struct ItemTuple* itemsTuple = &db->items[i];
+      int hashValue = hash(itemsTuple->salesDate * itemsTuple->employee,
+                           salesDateEmployeeToCountCardinality);
+      while (salesDateEmployeeToCountHT[hashValue].isOccupied) {
+        if (salesDateEmployeeToCountHT[hashValue].salesDate ==
+                itemsTuple->salesDate &&
+            salesDateEmployeeToCountHT[hashValue].employee ==
+                itemsTuple->employee) {
+          salesDateEmployeeToCountHT[hashValue].count++;
+        }
+        hashValue =
+            nextSlotLinear(hashValue, salesDateEmployeeToCountCardinality);
+      }
+    }
+
+    indices->salesDateEmployeeToCountHT = salesDateEmployeeToCountHT;
+    indices->salesDateEmployeeToCountCardinality =
+        salesDateEmployeeToCountCardinality;
   }
+
   db->indices = indices;
 }
 
@@ -452,9 +430,7 @@ void DestroyIndices(struct Database* db) {
   /// Free database indices
   struct Indices* indices = db->indices;
   free(indices->RLEDates);
-  // free(indices->primitiveRoots);
-  // free(indices->primitiveSizes);
-  free(indices->ordersHashTable);
+  free(indices->salesDateEmployeeToCountHT);
   free(indices);
   db->indices = NULL;
 }
