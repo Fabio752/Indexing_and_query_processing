@@ -41,7 +41,7 @@ struct Indices {
 // TODO: improve has function to something better (search online).
 int hash(int value, int size) { return value % size; }
 
-int hash2(int value, int size) { return (2 * value) % size; }
+int hash2(int value1, int value2, int size) { return ((223 + value1) * (47 + value2)) % size; }
 
 int nextSlotLinear(int currentSlot, int size) {
   return (currentSlot + 1) % size;
@@ -59,7 +59,7 @@ int nextSlotRehashed(int currentSlot, int size, int root) {
 int Query1(struct Database* db, int managerID, int price) {
   // TODO: use some indexing to speed this up. E.g. maybe sort items by price?
   // E.g. maybe prebuild ordersHashTableSize?
-  size_t ordersHashTableSize = db->ordersCardinality + 1;
+  size_t ordersHashTableSize = db->ordersCardinality * 2;
   struct OrdersHashTableSlot* ordersHashTable =
       malloc(ordersHashTableSize * sizeof(struct OrdersHashTableSlot));
 
@@ -75,7 +75,7 @@ int Query1(struct Database* db, int managerID, int price) {
       continue;
     }
     int hashValue =
-        hash(orderTuple->salesDate * orderTuple->employee, ordersHashTableSize);
+        hash2(orderTuple->salesDate, orderTuple->employee, ordersHashTableSize);
     while (ordersHashTable[hashValue].isOccupied) {
       hashValue = nextSlotLinear(hashValue, ordersHashTableSize);
     }
@@ -93,7 +93,7 @@ int Query1(struct Database* db, int managerID, int price) {
     struct ItemTuple* itemTuple = &db->items[i];
 
     int hashValue =
-        hash(itemTuple->salesDate * itemTuple->employee, ordersHashTableSize);
+        hash2(itemTuple->salesDate, itemTuple->employee, ordersHashTableSize);
     while (ordersHashTable[hashValue].isOccupied) {
       if (ordersHashTable[hashValue].salesDate == itemTuple->salesDate &&
           ordersHashTable[hashValue].employee == itemTuple->employee) {
@@ -102,7 +102,6 @@ int Query1(struct Database* db, int managerID, int price) {
       hashValue = nextSlotLinear(hashValue, ordersHashTableSize);
     }
   }
-
   free(ordersHashTable);
 
   return tupleCount;
@@ -216,7 +215,7 @@ int Query3(struct Database* db, int countryID) {
           orderTuple->employeeManagerID) {
         // Lookup how many items matched this pair (salesDate, employee).
         int hashValueSalesDateEmployee =
-            hash(orderTuple->salesDate * orderTuple->employee,
+            hash2(orderTuple->salesDate, orderTuple->employee,
                  salesDateEmployeeToCountCardinality);
         // TODO: change these condition to have == instead of !=. Usually ==
         // evaluates to false earlier.
@@ -324,7 +323,7 @@ void CreateIndices(struct Database* db) {
   struct Indices* indices = malloc(sizeof(struct Indices));
 
   {
-    // Create indexes for query 2.
+    // Create indices for query 2.
     // Observation: usually there are many repeated dates, which means that
     // using a Run-Length-Encoding with Length Prefix Summing should help
     // compressing the data a lot.
@@ -382,9 +381,10 @@ void CreateIndices(struct Database* db) {
     for (size_t i = 0; i < salesDateEmployeeToCountCardinality; i++) {
       salesDateEmployeeToCountHT[i].isOccupied = false;
     }
+    size_t conflicts = 0;
     for (size_t i = 0; i < db->ordersCardinality; i++) {
       struct OrderTuple* orderTuple = &db->orders[i];
-      int hashValue = hash(orderTuple->salesDate * orderTuple->employee,
+      int hashValue = hash2(orderTuple->salesDate, orderTuple->employee,
                            salesDateEmployeeToCountCardinality);
       while (salesDateEmployeeToCountHT[hashValue].isOccupied) {
         if (salesDateEmployeeToCountHT[hashValue].salesDate ==
@@ -398,6 +398,7 @@ void CreateIndices(struct Database* db) {
         }
         hashValue =
             nextSlotLinear(hashValue, salesDateEmployeeToCountCardinality);
+        conflicts++;
       }
       if (!salesDateEmployeeToCountHT[hashValue].isOccupied) {
         // Adding new pair (salesDate, employee).
@@ -407,12 +408,13 @@ void CreateIndices(struct Database* db) {
         salesDateEmployeeToCountHT[hashValue].count = 0;
       }
     }
-
+    // printf("conflicts = %ld\n", conflicts);
+    conflicts = 0;
     // Iterate through items to count how many rows have a particular pair
     // (salesDate, employee) that can be merged with orders.
     for (size_t i = 0; i < db->itemsCardinality; i++) {
       struct ItemTuple* itemsTuple = &db->items[i];
-      int hashValue = hash(itemsTuple->salesDate * itemsTuple->employee,
+      int hashValue = hash2(itemsTuple->salesDate, itemsTuple->employee,
                            salesDateEmployeeToCountCardinality);
       while (salesDateEmployeeToCountHT[hashValue].isOccupied &&
              (salesDateEmployeeToCountHT[hashValue].salesDate !=
@@ -421,11 +423,14 @@ void CreateIndices(struct Database* db) {
                   itemsTuple->employee)) {
         hashValue =
             nextSlotLinear(hashValue, salesDateEmployeeToCountCardinality);
+        conflicts++;
       }
       if (salesDateEmployeeToCountHT[hashValue].isOccupied) {
         salesDateEmployeeToCountHT[hashValue].count++;
       }
     }
+    // printf("conflicts = %ld\n", conflicts);
+
 
     indices->salesDateEmployeeToCountHT = salesDateEmployeeToCountHT;
     indices->salesDateEmployeeToCountCardinality =
