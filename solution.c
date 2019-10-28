@@ -1,10 +1,11 @@
 #include <stdbool.h>
 #include <stdlib.h>
+#include <pthread.h>
+#include <stdio.h>
 
 #include "solution.h"
 
 // DEBUG
-#include <stdio.h>
 #include <time.h>
 
 struct RLEDate {
@@ -58,6 +59,9 @@ int Query1(struct Database* db, int managerID, int price) {
   size_t ordersHashTableSize = db->ordersCardinality + 1;
   struct OrdersHashTableSlot* ordersHashTable =
       malloc(ordersHashTableSize * sizeof(struct OrdersHashTableSlot));
+  if (ordersHashTable == NULL) {
+    exit(1);
+  }
 
   // Initialize all slots to be empty. Slow.
   for (size_t i = 0; i < ordersHashTableSize; i++) {
@@ -193,6 +197,9 @@ int Query3(struct Database* db, int countryID) {
   // empty.
   size_t sizeStores = db->storesCardinality + 1;
   int* hashTableStores = malloc(sizeStores * sizeof(int));
+  if (hashTableStores == NULL) {
+    exit(1);
+  }
 
   // Initialize all slots to be empty. Slow.
   for (size_t i = 0; i < sizeStores; i++) {
@@ -258,6 +265,9 @@ int compare(const void* a, const void* b) { return *(int*)a - *(int*)b; }
 struct RLEDate* computeRLEDatesCountingSort(struct Database* db, size_t maximum,
                                             size_t* RLEDatesCardinality) {
   int* frequencyCount = malloc((maximum + 1) * sizeof(int));
+  if (frequencyCount == NULL) {
+    exit(1);
+  }
   // Initialize frequencies to zero.
   for (size_t i = 0; i <= (size_t)maximum; i++) {
     frequencyCount[i] = 0;
@@ -271,6 +281,9 @@ struct RLEDate* computeRLEDatesCountingSort(struct Database* db, size_t maximum,
 
   // Compute Run-Length-Encoding with Length Prefix Summing.
   struct RLEDate* RLEDates = malloc(different * sizeof(struct RLEDate));
+  if (RLEDates == NULL) {
+    exit(1);
+  }
   size_t RLEIndex = 0;
   int prefixCount = 0;
   for (size_t i = 0; i <= (size_t)maximum; i++) {
@@ -293,6 +306,9 @@ struct RLEDate* computeRLEDatesCountingSort(struct Database* db, size_t maximum,
 struct RLEDate* computeRLEDatesQSort(struct Database* db,
                                      size_t* RLEDatesCardinality) {
   int* orderedItemSalesDate = malloc(db->itemsCardinality * sizeof(int));
+  if (orderedItemSalesDate == NULL) {
+    exit(1);
+  }
   // Etract dates.
   for (size_t i = 0; i < db->itemsCardinality; i++) {
     orderedItemSalesDate[i] = db->items[i].salesDate;
@@ -310,6 +326,9 @@ struct RLEDate* computeRLEDatesQSort(struct Database* db,
 
   // Compute Run-Length-Encoding with Length Prefix Summing.
   struct RLEDate* RLEDates = malloc(different * sizeof(struct RLEDate));
+  if (RLEDates == NULL) {
+    exit(1);
+  }
   size_t RLEIndex = 0;
   for (size_t i = 1; i < db->itemsCardinality; i++) {
     if (orderedItemSalesDate[i] > orderedItemSalesDate[i - 1]) {
@@ -330,6 +349,9 @@ struct RLEDate* computeRLEDatesQSort(struct Database* db,
 
 void CreateIndices(struct Database* db) {
   struct Indices* indices = malloc(sizeof(struct Indices));
+  if (indices == NULL) {
+    exit(1);
+  }
 
   {
     // Create indices for query 2.
@@ -387,6 +409,9 @@ void CreateIndices(struct Database* db) {
     struct SalesDateEmployeeToCount* salesDateEmployeeToCountHT =
         malloc(salesDateEmployeeToCountCardinality *
                sizeof(struct SalesDateEmployeeToCount));
+    if (salesDateEmployeeToCountHT == NULL) {
+      exit(1);
+    }
     for (size_t i = 0; i < salesDateEmployeeToCountCardinality; i++) {
       salesDateEmployeeToCountHT[i].count = -1;
     }
