@@ -73,6 +73,11 @@ void GenerateData(Database& db, size_t itemsCardinality = 16384) {
       itemsCursor++;
     }
   }
+  for (; itemsCursor < db.itemsCardinality; itemsCursor++) {
+      db.items[itemsCursor].salesDate = db.orders[db.ordersCardinality-1].salesDate;
+      db.items[itemsCursor].employee = db.orders[db.ordersCardinality-1].employee;
+      db.items[itemsCursor].price = lcg() % numberOfUniquePrices;
+  }
 
   std::lognormal_distribution<double> distribution(.3, .8);
   for(size_t i = 0; i < db.itemsCardinality; i++)

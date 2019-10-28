@@ -56,4 +56,6 @@ target_include_directories(macrobenchmark SYSTEM PUBLIC ${CO572CW1_BINARY_DIR}/d
 add_executable(tests tests.cpp solution.c)
 add_dependencies(tests catch2)
 set_property(TARGET tests PROPERTY CXX_STANDARD 14)
+
+target_link_libraries(tests Threads::Threads)
 target_include_directories(tests SYSTEM PUBLIC ${CO572CW1_BINARY_DIR}/deps/include)
