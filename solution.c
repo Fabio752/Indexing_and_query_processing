@@ -1,12 +1,14 @@
-#include <stdbool.h>
-#include <stdlib.h>
 #include <pthread.h>
+#include <stdbool.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 #include "solution.h"
 
 // DEBUG
 #include <time.h>
+
+#define NUMBER_OF_THREADS 4 // We have 4 cores.
 
 struct RLEDate {
   int date;
@@ -23,6 +25,17 @@ struct SalesDateEmployeeToCount {
   int count;  // Negative count means empty slot.
   int salesDate;
   int employee;
+};
+
+struct ThreadData {
+  struct Database* db;
+  struct OrdersHashTableSlot* ordersHashTable;
+  size_t ordersHashTableSize;
+  int price;
+  size_t start;
+  size_t end;
+  int result;
+  pthread_t tid;
 };
 
 struct Indices {
@@ -51,6 +64,31 @@ int nextSlotExpo(int currentSlot, int size, int backOff) {
 int nextSlotRehashed(int currentSlot, int size, int root) {
   if (currentSlot == 0) return root;
   return (currentSlot * root) % size;
+}
+
+void* Q1ProbeOrders(void* args) {
+  // Count matching tuples.
+  int result = 0;
+  struct ThreadData* threadData = (struct ThreadData*)args;
+  for (size_t i = threadData->start; i < threadData->end; i++) {
+    if (threadData->db->items[i].price >= threadData->price) {
+      continue;
+    }
+    struct ItemTuple* itemTuple = &threadData->db->items[i];
+
+    int hashValue =
+        hash(itemTuple->salesDate * itemTuple->employee, threadData->ordersHashTableSize);
+    while (threadData->ordersHashTable[hashValue].count >= 0) {
+      if (threadData->ordersHashTable[hashValue].salesDate == itemTuple->salesDate &&
+          threadData->ordersHashTable[hashValue].employee == itemTuple->employee) {
+        result += threadData->ordersHashTable[hashValue].count;
+        break;
+      }
+      hashValue = nextSlotLinear(hashValue, threadData->ordersHashTableSize);
+    }
+  }
+  threadData->result = result;
+  return NULL;
 }
 
 int Query1(struct Database* db, int managerID, int price) {
@@ -95,28 +133,36 @@ int Query1(struct Database* db, int managerID, int price) {
     }
   }
 
-  // Count matching tuples.
-  int tupleCount = 0;
-  for (size_t i = 0; i < db->itemsCardinality; i++) {
-    if (db->items[i].price >= price) {
-      continue;
-    }
-    struct ItemTuple* itemTuple = &db->items[i];
-
-    int hashValue =
-        hash(itemTuple->salesDate * itemTuple->employee, ordersHashTableSize);
-    while (ordersHashTable[hashValue].count >= 0) {
-      if (ordersHashTable[hashValue].salesDate == itemTuple->salesDate &&
-          ordersHashTable[hashValue].employee == itemTuple->employee) {
-        tupleCount += ordersHashTable[hashValue].count;
-        break;
-      }
-      hashValue = nextSlotLinear(hashValue, ordersHashTableSize);
-    }
+  // Parallelize probing using threads.
+  struct ThreadData threadData[NUMBER_OF_THREADS];
+  // Split the ranges.
+  for (size_t i = 0; i < NUMBER_OF_THREADS; i++) {
+    threadData[i] = (struct ThreadData){
+        .db = db, // Shared.
+        .ordersHashTable = ordersHashTable, // Shared.
+        .ordersHashTableSize = ordersHashTableSize,
+        .price = price,
+        .start = i * db->itemsCardinality / NUMBER_OF_THREADS,
+        .end = (i + 1) * db->itemsCardinality / NUMBER_OF_THREADS};
   }
+  threadData[NUMBER_OF_THREADS - 1].end =
+      db->itemsCardinality;  // Make sure we cover the entire range.
+
+  // Start threads.
+  for (int i = 0; i < NUMBER_OF_THREADS; i++) {
+    pthread_create(&threadData[i].tid, NULL, Q1ProbeOrders, &threadData[i]);
+  }
+
+  int tuplesCount = 0;
+  // Join threads.
+  for (int i = 0; i < NUMBER_OF_THREADS; i++) {
+    pthread_join(threadData[i].tid, NULL);
+    tuplesCount += threadData[i].result;
+  }
+
   free(ordersHashTable);
 
-  return tupleCount;
+  return tuplesCount;
 }
 
 int Query2(struct Database* db, int discount, int date) {
