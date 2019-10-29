@@ -8,7 +8,7 @@
 // DEBUG
 #include <time.h>
 
-#define NUMBER_OF_THREADS 4  // We have 4 cores.
+#define NUMBER_OF_THREADS 4 // We have 4 cores.
 
 struct RLEDate {
   int date;
@@ -28,13 +28,12 @@ struct SalesDateEmployeeToCount {
 };
 
 struct ThreadData {
-  struct OrderTuple* orderPartition;
-  struct ItemTuple* itemPartition;
-  size_t partitionedOrderCardinality;
-  size_t partitionedItemCardinality;
-  size_t singleOrderSize;
-  size_t singleItemSize;
-  int threadNumber;
+  struct Database* db;
+  struct OrdersHashTableSlot* ordersHashTable;
+  size_t ordersHashTableSize;
+  int price;
+  size_t start;
+  size_t end;
   int result;
   pthread_t tid;
 };
@@ -67,17 +66,35 @@ int nextSlotRehashed(int currentSlot, int size, int root) {
   return (currentSlot * root) % size;
 }
 
-void* Q1BuildProbeOrders(void* args) {
-  // Build the four hash tables.
+void* Q1ProbeOrders(void* args) {
+  // Count matching tuples.
+  int result = 0;
   struct ThreadData* threadData = (struct ThreadData*)args;
-  size_t ordersHashTableSize = 2 * threadData->partitionedOrderCardinality;
+  for (size_t i = threadData->start; i < threadData->end; i++) {
+    if (threadData->db->items[i].price >= threadData->price) {
+      continue;
+    }
+    struct ItemTuple* itemTuple = &threadData->db->items[i];
 
-  // If the partition is empty just return NULL.
-  if (ordersHashTableSize == 0) {
-    return NULL;
+    int hashValue =
+        hash(itemTuple->salesDate * itemTuple->employee, threadData->ordersHashTableSize);
+    while (threadData->ordersHashTable[hashValue].count >= 0) {
+      if (threadData->ordersHashTable[hashValue].salesDate == itemTuple->salesDate &&
+          threadData->ordersHashTable[hashValue].employee == itemTuple->employee) {
+        result += threadData->ordersHashTable[hashValue].count;
+        break;
+      }
+      hashValue = nextSlotLinear(hashValue, threadData->ordersHashTableSize);
+    }
   }
+  threadData->result = result;
+  return NULL;
+}
 
-  // Build hash table on Orders.
+int Query1(struct Database* db, int managerID, int price) {
+  // TODO: use some indexing to speed this up. E.g. maybe sort items by price?
+  // E.g. maybe prebuild ordersHashTableSize?
+  size_t ordersHashTableSize = db->ordersCardinality + 1;
   struct OrdersHashTableSlot* ordersHashTable =
       malloc(ordersHashTableSize * sizeof(struct OrdersHashTableSlot));
   if (ordersHashTable == NULL) {
@@ -89,8 +106,12 @@ void* Q1BuildProbeOrders(void* args) {
     ordersHashTable[i].count = -1;
   }
 
-  for (size_t i = 0; i < threadData->partitionedOrderCardinality; i++) {
-    struct OrderTuple* orderTuple = &threadData->orderPartition[i];
+  // Build orders hash table.
+  for (size_t i = 0; i < db->ordersCardinality; i++) {
+    struct OrderTuple* orderTuple = &db->orders[i];
+    if (orderTuple->employeeManagerID != managerID) {
+      continue;
+    }
     int hashValue =
         hash(orderTuple->salesDate * orderTuple->employee, ordersHashTableSize);
     while (ordersHashTable[hashValue].count >= 0) {
@@ -112,130 +133,34 @@ void* Q1BuildProbeOrders(void* args) {
     }
   }
 
-  // Count matching tuples.
-  int result = 0;
-
-  // Probing.
-  for (size_t i = 0; i < threadData->partitionedItemCardinality; i++) {
-    struct ItemTuple* itemTuple = &threadData->itemPartition[i];
-    int hashValue = hash(itemTuple->salesDate * itemTuple->employee,
-                         2 * threadData->partitionedOrderCardinality);
-    while (ordersHashTable[hashValue].count >= 0) {
-      if (ordersHashTable[hashValue].salesDate == itemTuple->salesDate &&
-          ordersHashTable[hashValue].employee == itemTuple->employee) {
-        result += ordersHashTable[hashValue].count;
-        break;
-      }
-      hashValue = nextSlotLinear(hashValue,
-                                 2 * threadData->partitionedOrderCardinality);
-    }
-  }
-  free(ordersHashTable);
-  threadData->result = result;
-  return NULL;
-}
-
-int Query1(struct Database* db, int managerID, int price) {
-  // TODO: use some indexing to speed this up. E.g. maybe sort items by price?
-  // E.g. maybe prebuild ordersHashTableSize?
-
+  // Parallelize probing using threads.
   struct ThreadData threadData[NUMBER_OF_THREADS];
-
-  // Partition Order table.
-  // We remove tuples when partitioning, so it is safe to use a small size.
-  size_t partitionedOrderCardinality =
-      db->ordersCardinality / NUMBER_OF_THREADS;
-  // Index of the current slot to fill, for each partition.
-  size_t orderPartitionsIndexes[NUMBER_OF_THREADS];
-  // Array of partitions.
-  // TODO: No need to use OrderTuple, we only use part of the data in the tuple.
-  struct OrderTuple* orderPartitions[NUMBER_OF_THREADS];
-
-  for (int i = 0; i < NUMBER_OF_THREADS; i++) {
-    orderPartitionsIndexes[i] = 0;
-    orderPartitions[i] =
-        malloc(partitionedOrderCardinality * sizeof(struct OrderTuple));
-  }
-
-  // Fill up partitioned arrays.
-  for (size_t i = 0; i < db->ordersCardinality; i++) {
-    if (db->orders[i].employeeManagerID != managerID) {
-      continue;
-    }
-    // Choose the partition that will contain the current tuple.
-    size_t partitionIndex =
-        (db->orders[i].salesDate + db->orders[i].employee) % NUMBER_OF_THREADS;
-    size_t nextEmptySlot = orderPartitionsIndexes[partitionIndex];
-    orderPartitions[partitionIndex][nextEmptySlot].employee =
-        db->orders[i].employee;
-    orderPartitions[partitionIndex][nextEmptySlot].salesDate =
-        db->orders[i].salesDate;
-    orderPartitionsIndexes[partitionIndex]++;
-  }
-
-  // Partition Item table.
-  size_t partitionedItemCardinality =
-      (2 * db->itemsCardinality) / NUMBER_OF_THREADS;
-  // Index of the current slot to fill, for each partition.
-  size_t itemPartitionsIndexes[NUMBER_OF_THREADS];
-  // Array of partitions.
-  struct ItemTuple* itemPartitions[NUMBER_OF_THREADS];
-
-  for (int i = 0; i < 4; i++) {
-    itemPartitionsIndexes[i] = 0;
-    itemPartitions[i] =
-        malloc(partitionedItemCardinality * sizeof(struct ItemTuple));
-  }
-
-  // Fill up partitioned arrays.
-  for (size_t i = 0; i < db->itemsCardinality; i++) {
-    if (db->items[i].price >= price) {
-      continue;
-    }
-    // Choose the partition that will contain the current tuple.
-    size_t partitionIndex =
-        (db->items[i].salesDate + db->items[i].employee) % NUMBER_OF_THREADS;
-    size_t nextEmptySlot = itemPartitionsIndexes[partitionIndex];
-    itemPartitions[partitionIndex][nextEmptySlot].employee =
-        db->items[i].employee;
-    itemPartitions[partitionIndex][nextEmptySlot].salesDate =
-        db->items[i].salesDate;
-    itemPartitionsIndexes[partitionIndex]++;
-  }
-
-  // Parallelise probing using threads.
   // Split the ranges.
   for (size_t i = 0; i < NUMBER_OF_THREADS; i++) {
     threadData[i] = (struct ThreadData){
-        .orderPartition = orderPartitions[i],
-        .itemPartition = itemPartitions[i],
-        .partitionedOrderCardinality = orderPartitionsIndexes[i],
-        .partitionedItemCardinality = itemPartitionsIndexes[i],
-        .singleOrderSize = partitionedOrderCardinality,
-        .singleItemSize = partitionedItemCardinality,
-        .threadNumber = i,
-        .result = 0};
+        .db = db, // Shared.
+        .ordersHashTable = ordersHashTable, // Shared.
+        .ordersHashTableSize = ordersHashTableSize,
+        .price = price,
+        .start = i * db->itemsCardinality / NUMBER_OF_THREADS,
+        .end = (i + 1) * db->itemsCardinality / NUMBER_OF_THREADS};
   }
+  threadData[NUMBER_OF_THREADS - 1].end =
+      db->itemsCardinality;  // Make sure we cover the entire range.
 
   // Start threads.
   for (int i = 0; i < NUMBER_OF_THREADS; i++) {
-    // Only start relevant thread if you have elements in both partitions.
-    if (orderPartitionsIndexes[i] > 0 && itemPartitionsIndexes[i] > 0) {
-      pthread_create(&threadData[i].tid, NULL, Q1BuildProbeOrders,
-                     &threadData[i]);
-    }
+    pthread_create(&threadData[i].tid, NULL, Q1ProbeOrders, &threadData[i]);
   }
 
   int tuplesCount = 0;
   // Join threads.
   for (int i = 0; i < NUMBER_OF_THREADS; i++) {
-    if (orderPartitionsIndexes[i] > 0 && itemPartitionsIndexes[i] > 0) {
-      pthread_join(threadData[i].tid, NULL);
-      tuplesCount += threadData[i].result;
-    }
-    free(orderPartitions[i]);
-    free(itemPartitions[i]);
+    pthread_join(threadData[i].tid, NULL);
+    tuplesCount += threadData[i].result;
   }
+
+  free(ordersHashTable);
 
   return tuplesCount;
 }
