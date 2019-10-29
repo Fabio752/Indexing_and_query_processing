@@ -98,15 +98,15 @@ void* Q1ProbeOrders(void* args) {
 
     int hashValue = hash(itemTuple->salesDate * itemTuple->employee,
                          threadData->ordersHashTableSize);
-    while (threadData->ordersHashTable[hashValue].count >= 0) {
-      if (threadData->ordersHashTable[hashValue].salesDate ==
-              itemTuple->salesDate &&
-          threadData->ordersHashTable[hashValue].employee ==
-              itemTuple->employee) {
-        result += threadData->ordersHashTable[hashValue].count;
-        break;
-      }
+    while (threadData->ordersHashTable[hashValue].count >= 0 &&
+           !(threadData->ordersHashTable[hashValue].salesDate ==
+                 itemTuple->salesDate &&
+             threadData->ordersHashTable[hashValue].employee ==
+                 itemTuple->employee)) {
       hashValue = nextSlotLinear(hashValue, threadData->ordersHashTableSize);
+    }
+    if (threadData->ordersHashTable[hashValue].count >= 0) {
+      result += threadData->ordersHashTable[hashValue].count;
     }
   }
   threadData->result = result;
@@ -136,15 +136,9 @@ int Query1(struct Database* db, int managerID, int price) {
     }
     int hashValue =
         hash(orderTuple->salesDate * orderTuple->employee, ordersHashTableSize);
-    while (ordersHashTable[hashValue].count >= 0) {
-      if (ordersHashTable[hashValue].salesDate == orderTuple->salesDate &&
-          ordersHashTable[hashValue].employee == orderTuple->employee) {
-        // We already have inserted the pair (salesDate, employee) in the
-        // table, so we don't need to add it again. This also guarantees the
-        // uniqueness in the keys of the table.
-        ordersHashTable[hashValue].count++;
-        break;
-      }
+    while (ordersHashTable[hashValue].count >= 0 &&
+           !(ordersHashTable[hashValue].salesDate == orderTuple->salesDate &&
+             ordersHashTable[hashValue].employee == orderTuple->employee)) {
       hashValue = nextSlotLinear(hashValue, ordersHashTableSize);
     }
     if (ordersHashTable[hashValue].count < 0) {
@@ -152,6 +146,11 @@ int Query1(struct Database* db, int managerID, int price) {
       ordersHashTable[hashValue].count = 1;
       ordersHashTable[hashValue].salesDate = orderTuple->salesDate;
       ordersHashTable[hashValue].employee = orderTuple->employee;
+    } else {
+      // We already have inserted the pair (salesDate, employee) in the
+      // table, so we don't need to add it again. This also guarantees the
+      // uniqueness in the keys of the table.
+      ordersHashTable[hashValue].count++;
     }
   }
 
@@ -316,10 +315,10 @@ void* Q3ProbeOrders(void* args) {
         // evaluates to false earlier.
         while (
             salesDateEmployeeToCountHT[hashValueSalesDateEmployee].count >= 0 &&
-            (salesDateEmployeeToCountHT[hashValueSalesDateEmployee].salesDate !=
-                 orderTuple->salesDate ||
-             salesDateEmployeeToCountHT[hashValueSalesDateEmployee].employee !=
-                 orderTuple->employee)) {
+            !(salesDateEmployeeToCountHT[hashValueSalesDateEmployee]
+                      .salesDate == orderTuple->salesDate &&
+              salesDateEmployeeToCountHT[hashValueSalesDateEmployee].employee ==
+                  orderTuple->employee)) {
           hashValueSalesDateEmployee = nextSlotLinear(
               hashValueSalesDateEmployee, salesDateEmployeeToCountCardinality);
         }
@@ -558,16 +557,14 @@ void CreateIndices(struct Database* db) {
       struct OrderTuple* orderTuple = &db->orders[i];
       int hashValue = hash2(orderTuple->salesDate, orderTuple->employee,
                             salesDateEmployeeToCountCardinality);
-      while (salesDateEmployeeToCountHT[hashValue].count >= 0) {
-        if (salesDateEmployeeToCountHT[hashValue].salesDate ==
-                orderTuple->salesDate &&
-            salesDateEmployeeToCountHT[hashValue].employee ==
-                orderTuple->employee) {
-          // We already have inserted the pair (salesDate, employee) in the
-          // table, so we don't need to add it again. This also guarantees the
-          // uniqueness in the keys of the table.
-          break;
-        }
+      while (salesDateEmployeeToCountHT[hashValue].count >= 0 &&
+             !(salesDateEmployeeToCountHT[hashValue].salesDate ==
+                   orderTuple->salesDate &&
+               salesDateEmployeeToCountHT[hashValue].employee ==
+                   orderTuple->employee)) {
+        // If we have already inserted the pair (salesDate, employee) in the
+        // table, we don't need to add it again and the while terminates.
+        // This guarantees the uniqueness in the keys of the table.
         hashValue =
             nextSlotLinear(hashValue, salesDateEmployeeToCountCardinality);
       }
@@ -585,10 +582,10 @@ void CreateIndices(struct Database* db) {
       int hashValue = hash2(itemsTuple->salesDate, itemsTuple->employee,
                             salesDateEmployeeToCountCardinality);
       while (salesDateEmployeeToCountHT[hashValue].count >= 0 &&
-             (salesDateEmployeeToCountHT[hashValue].salesDate !=
-                  itemsTuple->salesDate ||
-              salesDateEmployeeToCountHT[hashValue].employee !=
-                  itemsTuple->employee)) {
+             !(salesDateEmployeeToCountHT[hashValue].salesDate ==
+                   itemsTuple->salesDate &&
+               salesDateEmployeeToCountHT[hashValue].employee ==
+                   itemsTuple->employee)) {
         hashValue =
             nextSlotLinear(hashValue, salesDateEmployeeToCountCardinality);
       }
