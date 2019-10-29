@@ -1,1 +1,114 @@
-Here explain the choices we made.
+Group members: Fabio Deo, Marco Selvatici.
+
+Score in the competition: 523614
+
+Introduction
+There will be a brief section for each query, explaining the idea how it works.
+Some queries may require the use of indices, and that will be pointed out during
+the explanation.
+
+Query 1
+This query basically implements an hash join.
+Since the conditions applied on both tables reduce by a lot the number of items,
+we found out that prebuilding hash tables or using foreign key joins actually
+does not improve performance. For this reason we used no indices for this query.
+
+Instead, we tried to partition both tables, and split the work through 4 threads.
+This gave a little speedup (code at commit aa208299f5f2d6ee9f0fe297790c6925d14feb82).
+
+Actual code steps:
+1) build Orders hash table, using only the relevant elements.
+2) Split the range 0 -> itemsCardinality in several parts, based on the number
+   of cores available.
+3) Run a thread per core, which iterates through a piece of the Items table and
+   count the tuples that can be joined with orders (using the Orders hash table
+   previously built).
+
+Complexity:
+- Build indices: N/A
+- Execute query:
+  - time: O(itemsCardinality + ordersCardinality)
+  - space: O(ordersCardinality)
+
+
+Query 2
+Our implementation of Q2 is based on the observation that usually the Items table
+contains many repeated dates, and that the date is basically the only information we
+care about.
+This means that Run-Length-Encoding the salesDate in Items enormously reduces the
+size of the data structure we have too lookup, which translates in much much faster
+lookups.
+Since we need to count how many tuples lie in ranges like
+Items.salesDate <= Orders.salesDate <= Items.salesDate + x
+we compute the prefix sum of the Run-Length-Encoded salesDate, which allowes us to
+perform lookups in O(log(number_of_different_salesDates)) time (using a couple of
+binary searches).
+
+This set of changes gave a speedup of over 1000 times with respect to the initial
+naive nested loop join implementation.
+
+Actual code steps (steps marked with a star happens when building indices):
+1*) Find out how distributed the Items.salesDate are.
+2*) Sort Items.salesDate:
+    2.1*) if the salesDate are close, use a custom implemented counting sort
+          (around 40 times faster than the stdlib qsort).
+    2.2*) if data distribution makes the use of counting sort impractical, fall
+          back to the stdlib qsort.
+3*) Run lenght encode the salesDate, and calculate the prefix sum (actually steps
+    2 and 3 are merged together for performance).
+4) Split the range 0 -> ordersCardinality in several parts, based on the number
+   of cores available.
+5) Run a thread per core, which iterates through a piece of the Orders table and
+   counts how many items have a salesDate between Order.salesDate - x and
+   Orders.salesDate (using two binary searches on the RLE index previously built).
+6) Join the threads and return the result.
+
+Complexity:
+- Build indices:
+  - time: O(itemsCardinality) [with counting sort]
+  - time: O(itemsCardinality * log(itemsCardinality)) [with stdlib qsort]
+  - space: O(number_of_different_salesDates)
+- Execute query:
+  - time: O(ordersCardinality * log(number_of_different_salesDates))
+  - space: O(1)
+
+
+Query 3
+Our implementation of Q3 is based on one key observation: Items.salesDate and
+Items.employee are "foreing keys" of Orders.salesDate and Orders.employee.
+This means that we can precalculate a join when building the indices, and this
+join will have cardinality <= ordersCardinality (very important since usually
+itemsCardinality is way bigger).
+We also build a hash table for the stores, which tends to be pretty small.
+
+Actual code steps (steps marked with a star happens when building indices):
+1*) Create hash table with key (salesDate, employee) and value a count representing
+    how many tuples in Items have that particular (salesDate, employee) pair.
+    This step is basically a group by (salesDate, employee), performed on Items.
+    Using some extra logic to make sure there are no duplicates in this hash table
+    also improves the overall performance.
+2) Build hash table for stores, only considering relevant tuples.
+4) Split the range 0 -> ordersCardinality in several parts, based on the number
+   of cores available.
+5) Run a thread per core, which iterates through a piece of the Orders table and
+   counts the number of tuples in the prebuild Items-Orders join that can also
+   be joined with stores.
+6) Join the threads and return the result.
+
+Complexity:
+- Build indices:
+  - time: O(itemsCardinality + ordersCardinality)
+  - space: O(ordersCardinality)
+- Execute query:
+  - time: O(storesCardinality + ordersCardinality)
+  - space: O(storesCardinality)
+
+
+Extra
+I think there are many parts of our solution that can qualify as extra:
+- The use of partitioned parallel build and probing of hash tables in Q1.
+- The use of adaptitive code that builds Q2 index in different ways depending
+  on the data distribution.
+- The use of an aggregation and foreign key join in Q3.
+- The very good performance on the labts submission.
+
