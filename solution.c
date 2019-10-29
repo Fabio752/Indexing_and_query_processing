@@ -10,6 +10,16 @@
 
 #define NUMBER_OF_THREADS 4  // We have 4 cores.
 
+struct ShortItemTuple {
+  int salesDate;
+  int employee;
+};
+
+struct PriceToItemTuples {
+  int index;
+  struct ShortItemTuple* tuples;
+};
+
 struct RLEDate {
   int date;
   int prefixCount;
@@ -28,6 +38,8 @@ struct SalesDateEmployeeToCount {
 };
 
 struct Indices {
+  struct PriceToItemTuples* pricesToItemTuples;
+
   struct RLEDate* RLEDates;
   size_t RLEDatesCardinality;
 
@@ -93,25 +105,30 @@ int nextSlotRehashed(int currentSlot, int size, int root) {
 
 void* Q1ProbeOrders(void* args) {
   // Count matching tuples.
-  int result = 0;
   struct ThreadDataQ1 threadData = *((struct ThreadDataQ1*)args);
+  struct Indices* indices = threadData.db->indices;
+  struct PriceToItemTuples* pricesToItemTuples = indices->pricesToItemTuples;
+
+  int result = 0;
   for (size_t i = threadData.start; i < threadData.end; i++) {
-    if (threadData.db->items[i].price >= threadData.price) {
+    if (pricesToItemTuples[i].index < 0) {
       continue;
     }
-    struct ItemTuple* itemTuple = &threadData.db->items[i];
 
-    int hashValue = hash(itemTuple->salesDate + itemTuple->employee,
-                         threadData.ordersHashTableSize);
-    while (threadData.ordersHashTable[hashValue].count >= 0 &&
-           !(threadData.ordersHashTable[hashValue].salesDate ==
-                 itemTuple->salesDate &&
-             threadData.ordersHashTable[hashValue].employee ==
-                 itemTuple->employee)) {
-      hashValue = nextSlotLinear(hashValue, threadData.ordersHashTableSize);
-    }
-    if (threadData.ordersHashTable[hashValue].count >= 0) {
-      result += threadData.ordersHashTable[hashValue].count;
+    for (int j = 0; j < pricesToItemTuples[i].index; j++) {
+      struct ShortItemTuple* itemTuple = &pricesToItemTuples[i].tuples[j];
+      int hashValue = hash(itemTuple->salesDate + itemTuple->employee,
+                           threadData.ordersHashTableSize);
+      while (threadData.ordersHashTable[hashValue].count >= 0 &&
+            !(threadData.ordersHashTable[hashValue].salesDate ==
+                  itemTuple->salesDate &&
+              threadData.ordersHashTable[hashValue].employee ==
+                  itemTuple->employee)) {
+        hashValue = nextSlotLinear(hashValue, threadData.ordersHashTableSize);
+      }
+      if (threadData.ordersHashTable[hashValue].count >= 0) {
+        result += threadData.ordersHashTable[hashValue].count;
+      }
     }
   }
   ((struct ThreadDataQ1*)args)->result = result;
@@ -168,11 +185,10 @@ int Query1(struct Database* db, int managerID, int price) {
         .ordersHashTable = ordersHashTable,  // Shared.
         .ordersHashTableSize = ordersHashTableSize,
         .price = price,
-        .start = i * db->itemsCardinality / NUMBER_OF_THREADS,
-        .end = (i + 1) * db->itemsCardinality / NUMBER_OF_THREADS};
+        .start = i * price / NUMBER_OF_THREADS,
+        .end = (i + 1) * price / NUMBER_OF_THREADS};
   }
-  threadData[NUMBER_OF_THREADS - 1].end =
-      db->itemsCardinality;  // Make sure we cover the entire range.
+  threadData[NUMBER_OF_THREADS - 1].end = price;  // Make sure we cover the entire range.
 
   // Start threads.
   for (int i = 0; i < NUMBER_OF_THREADS; i++) {
@@ -490,6 +506,55 @@ struct RLEDate* computeRLEDatesQSort(struct Database* db,
   return RLEDates;
 }
 
+void* buildQ1Index(void* args) {
+  // Sort items by price using a counting sort.
+  // We know we have a maximum of itemsCardinality/2 unique prices.
+  struct ThreadDataBuildIndex* threadData = (struct ThreadDataBuildIndex*)args;
+  struct Database* db = threadData->db;
+
+  int* pricesCount = malloc(db->itemsCardinality / 2 * sizeof(int));
+  if (pricesCount == NULL) {
+    exit(1);
+  }
+  // Initialize count to zero.
+  for (size_t i = 0; i < db->itemsCardinality / 2; i++) {
+    pricesCount[i] = 0;
+  }
+  // Count how many tuples for each prices.
+  for (size_t i = 0; i < db->itemsCardinality; i++) {
+    pricesCount[db->items[i].price]++;
+  }
+  // Reserve the memory required at each price.
+  struct PriceToItemTuples* pricesToItemTuples =
+      malloc(db->itemsCardinality / 2 * sizeof(struct PriceToItemTuples));
+  for (size_t i = 0; i < db->itemsCardinality / 2; i++) {
+    if (pricesCount[i] != 0) {
+      pricesToItemTuples[i].index = 0;
+      pricesToItemTuples[i].tuples =
+          malloc(pricesCount[i] * sizeof(struct ShortItemTuple));
+      if (pricesToItemTuples[i].tuples == NULL) {
+        exit(1);
+      }
+    } else {
+      pricesToItemTuples[i].index = -1;
+    }
+  }
+  // Populate pricesToItemTuples.
+  for (size_t i = 0; i < db->itemsCardinality; i++) {
+    int curIdx = pricesToItemTuples[db->items[i].price].index;
+    pricesToItemTuples[db->items[i].price].tuples[curIdx] =
+        (struct ShortItemTuple){.salesDate = db->items[i].salesDate,
+                                .employee = db->items[i].employee};
+    pricesToItemTuples[db->items[i].price].index++;
+  }
+
+  free(pricesCount);
+  struct Indices* indices = db->indices;
+  indices->pricesToItemTuples = pricesToItemTuples;
+
+  return NULL;
+}
+
 void* buildQ2Index(void* args) {
   // Create indices for query 2.
   // Observation: usually there are many repeated dates, which means that
@@ -613,6 +678,8 @@ void CreateIndices(struct Database* db) {
   }
   db->indices = indices;
 
+  struct ThreadDataBuildIndex threadDataQ1 = {.db = db};
+  pthread_create(&threadDataQ1.tid, NULL, buildQ1Index, &threadDataQ1);
   struct ThreadDataBuildIndex threadDataQ2 = {.db = db};
   pthread_create(&threadDataQ2.tid, NULL, buildQ2Index, &threadDataQ2);
   struct ThreadDataBuildIndex threadDataQ3 = {.db = db};
@@ -620,11 +687,18 @@ void CreateIndices(struct Database* db) {
 
   pthread_join(threadDataQ2.tid, NULL);
   pthread_join(threadDataQ3.tid, NULL);
+  pthread_join(threadDataQ1.tid, NULL);
 }
 
 void DestroyIndices(struct Database* db) {
   /// Free database indices
   struct Indices* indices = db->indices;
+  for (size_t i = 0; i < db->itemsCardinality / 2; i++) {
+    if (indices->pricesToItemTuples[i].index >= 0) {
+      free(indices->pricesToItemTuples[i].tuples);
+    }
+  }
+  free(indices->pricesToItemTuples);
   free(indices->RLEDates);
   free(indices->salesDateEmployeeToCountHT);
   free(indices);
