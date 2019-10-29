@@ -1,5 +1,6 @@
 #include <pthread.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -11,20 +12,20 @@
 #define NUMBER_OF_THREADS 4  // We have 4 cores.
 
 struct RLEDate {
-  int date;
+  uint16_t date;
   int prefixCount;
 };
 
 struct OrdersHashTableSlot {
-  int count;  // Negative count means emply slot.
-  int salesDate;
-  int employee;
+  int count;           // Negative count means emply slot.
+  uint16_t salesDate;  // Max is 16384.
+  uint16_t employee;   // Max is 10752.
 };
 
 struct SalesDateEmployeeToCount {
-  int count;  // Negative count means empty slot.
-  int salesDate;
-  int employee;
+  int count;           // Negative count means empty slot.
+  uint16_t salesDate;  // Max is 16384.
+  uint16_t employee;   // Max is 10752.
 };
 
 struct Indices {
