@@ -66,6 +66,11 @@ struct ThreadDataQ3 {
   pthread_t tid;
 };
 
+struct ThreadDataBuildIndex {
+  struct Database* db;
+  pthread_t tid;
+};
+
 // TODO: improve has function to something better (search online).
 int hash(int value, int size) { return value % size; }
 
@@ -485,121 +490,136 @@ struct RLEDate* computeRLEDatesQSort(struct Database* db,
   return RLEDates;
 }
 
+void* buildQ2Index(void* args) {
+  // Create indices for query 2.
+  // Observation: usually there are many repeated dates, which means that
+  // using a Run-Length-Encoding with Length Prefix Summing should help
+  // compressing the data a lot.
+
+  // Find out about how sparse the values are in order to use the appropriate
+  // sorting function.
+  struct ThreadDataBuildIndex* threadData = (struct ThreadDataBuildIndex*)args;
+  struct Database* db = threadData->db;
+
+  int minimum = __INT_MAX__;
+  int maximum = -1;
+  for (size_t i = 0; i < db->itemsCardinality; i++) {
+    if (db->items[i].salesDate < minimum) {
+      minimum = db->items[i].salesDate;
+    }
+    if (db->items[i].salesDate > maximum) {
+      maximum = db->items[i].salesDate;
+    }
+  }
+
+  size_t RLEDatesCardinality;
+  struct RLEDate* RLEDates;
+
+  if ((size_t)(maximum - minimum) < db->itemsCardinality) {
+    // Data are not very sparse, it makes sense to use counting sort.
+    RLEDates = computeRLEDatesCountingSort(db, maximum, &RLEDatesCardinality);
+  } else {
+    // Use normal sort from stdlib.
+    RLEDates = computeRLEDatesQSort(db, &RLEDatesCardinality);
+  }
+
+  struct Indices* indices = db->indices;
+  indices->RLEDates = RLEDates;
+  indices->RLEDatesCardinality = RLEDatesCardinality;
+  return NULL;
+}
+
+void* buildQ3Index(void* args) {
+  // Q3 indices.
+  // Observations: we know that items.salesDate and items.employee are foreign
+  // keys into orders. We also don't care about price in Q3. Idea:
+  // 1) aggregate items, counting the number of different prices for each pair
+  //    salesDate and employee. This table will have cardinality <=
+  //    ordersCardinality.
+  // 2) join the aggregated items with orders. This table will have
+  //    cardinality <= ordersCardinality.
+  // 3) Use this in Q3.
+  // 4) Win the contest.
+  // (maybe you can do step 1 and 2 together)
+
+  // Create hash table from the pair (salesDate, employee) to count.
+  // Each pair (salesDate, employee) comes from Orders, and the count is
+  // initially set to zero.
+  struct ThreadDataBuildIndex* threadData = (struct ThreadDataBuildIndex*)args;
+  struct Database* db = threadData->db;
+
+  size_t salesDateEmployeeToCountCardinality = db->ordersCardinality * 2;
+  struct SalesDateEmployeeToCount* salesDateEmployeeToCountHT =
+      malloc(salesDateEmployeeToCountCardinality *
+             sizeof(struct SalesDateEmployeeToCount));
+  if (salesDateEmployeeToCountHT == NULL) {
+    exit(1);
+  }
+  for (size_t i = 0; i < salesDateEmployeeToCountCardinality; i++) {
+    salesDateEmployeeToCountHT[i].count = -1;
+  }
+  for (size_t i = 0; i < db->ordersCardinality; i++) {
+    struct OrderTuple* orderTuple = &db->orders[i];
+    int hashValue = hash2(orderTuple->salesDate, orderTuple->employee,
+                          salesDateEmployeeToCountCardinality);
+    while (salesDateEmployeeToCountHT[hashValue].count >= 0 &&
+           !(salesDateEmployeeToCountHT[hashValue].salesDate ==
+                 orderTuple->salesDate &&
+             salesDateEmployeeToCountHT[hashValue].employee ==
+                 orderTuple->employee)) {
+      // If we have already inserted the pair (salesDate, employee) in the
+      // table, we don't need to add it again and the while terminates.
+      // This guarantees the uniqueness in the keys of the table.
+      hashValue =
+          nextSlotLinear(hashValue, salesDateEmployeeToCountCardinality);
+    }
+    if (salesDateEmployeeToCountHT[hashValue].count < 0) {
+      // Adding new pair (salesDate, employee).
+      salesDateEmployeeToCountHT[hashValue].count = 0;
+      salesDateEmployeeToCountHT[hashValue].salesDate = orderTuple->salesDate;
+      salesDateEmployeeToCountHT[hashValue].employee = orderTuple->employee;
+    }
+  }
+  // Iterate through items to count how many rows have a particular pair
+  // (salesDate, employee) that can be merged with orders.
+  for (size_t i = 0; i < db->itemsCardinality; i++) {
+    struct ItemTuple* itemsTuple = &db->items[i];
+    int hashValue = hash2(itemsTuple->salesDate, itemsTuple->employee,
+                          salesDateEmployeeToCountCardinality);
+    while (salesDateEmployeeToCountHT[hashValue].count >= 0 &&
+           !(salesDateEmployeeToCountHT[hashValue].salesDate ==
+                 itemsTuple->salesDate &&
+             salesDateEmployeeToCountHT[hashValue].employee ==
+                 itemsTuple->employee)) {
+      hashValue =
+          nextSlotLinear(hashValue, salesDateEmployeeToCountCardinality);
+    }
+    if (salesDateEmployeeToCountHT[hashValue].count >= 0) {
+      salesDateEmployeeToCountHT[hashValue].count++;
+    }
+  }
+
+  struct Indices* indices = db->indices;
+  indices->salesDateEmployeeToCountHT = salesDateEmployeeToCountHT;
+  indices->salesDateEmployeeToCountCardinality =
+      salesDateEmployeeToCountCardinality;
+  return NULL;
+}
+
 void CreateIndices(struct Database* db) {
   struct Indices* indices = malloc(sizeof(struct Indices));
   if (indices == NULL) {
     exit(1);
   }
-
-  {
-    // Create indices for query 2.
-    // Observation: usually there are many repeated dates, which means that
-    // using a Run-Length-Encoding with Length Prefix Summing should help
-    // compressing the data a lot.
-
-    // Find out about how sparse the values are in order to use the appropriate
-    // sorting function.
-    int minimum = __INT_MAX__;
-    int maximum = -1;
-    for (size_t i = 0; i < db->itemsCardinality; i++) {
-      if (db->items[i].salesDate < minimum) {
-        minimum = db->items[i].salesDate;
-      }
-      if (db->items[i].salesDate > maximum) {
-        maximum = db->items[i].salesDate;
-      }
-    }
-
-    size_t RLEDatesCardinality;
-    struct RLEDate* RLEDates;
-
-    if ((size_t)(maximum - minimum) < db->itemsCardinality) {
-      // Data are not very sparse, it makes sense to use counting sort.
-      RLEDates = computeRLEDatesCountingSort(db, maximum, &RLEDatesCardinality);
-    } else {
-      // Use normal sort from stdlib.
-      RLEDates = computeRLEDatesQSort(db, &RLEDatesCardinality);
-    }
-
-    indices->RLEDates = RLEDates;
-    indices->RLEDatesCardinality = RLEDatesCardinality;
-  }
-
-  {
-    // TODO: this is weirdly slow.
-
-    // Q3 indices.
-    // Observations: we know that items.salesDate and items.employee are foreign
-    // keys into orders. We also don't care about price in Q3. Idea:
-    // 1) aggregate items, counting the number of different prices for each pair
-    //    salesDate and employee. This table will have cardinality <=
-    //    ordersCardinality.
-    // 2) join the aggregated items with orders. This table will have
-    //    cardinality <= ordersCardinality.
-    // 3) Use this in Q3.
-    // 4) Win the contest.
-    // (maybe you can do step 1 and 2 together)
-
-    // Create hash table from the pair (salesDate, employee) to count.
-    // Each pair (salesDate, employee) comes from Orders, and the count is
-    // initially set to zero.
-    size_t salesDateEmployeeToCountCardinality = db->ordersCardinality * 2;
-    struct SalesDateEmployeeToCount* salesDateEmployeeToCountHT =
-        malloc(salesDateEmployeeToCountCardinality *
-               sizeof(struct SalesDateEmployeeToCount));
-    if (salesDateEmployeeToCountHT == NULL) {
-      exit(1);
-    }
-    for (size_t i = 0; i < salesDateEmployeeToCountCardinality; i++) {
-      salesDateEmployeeToCountHT[i].count = -1;
-    }
-    for (size_t i = 0; i < db->ordersCardinality; i++) {
-      struct OrderTuple* orderTuple = &db->orders[i];
-      int hashValue = hash2(orderTuple->salesDate, orderTuple->employee,
-                            salesDateEmployeeToCountCardinality);
-      while (salesDateEmployeeToCountHT[hashValue].count >= 0 &&
-             !(salesDateEmployeeToCountHT[hashValue].salesDate ==
-                   orderTuple->salesDate &&
-               salesDateEmployeeToCountHT[hashValue].employee ==
-                   orderTuple->employee)) {
-        // If we have already inserted the pair (salesDate, employee) in the
-        // table, we don't need to add it again and the while terminates.
-        // This guarantees the uniqueness in the keys of the table.
-        hashValue =
-            nextSlotLinear(hashValue, salesDateEmployeeToCountCardinality);
-      }
-      if (salesDateEmployeeToCountHT[hashValue].count < 0) {
-        // Adding new pair (salesDate, employee).
-        salesDateEmployeeToCountHT[hashValue].count = 0;
-        salesDateEmployeeToCountHT[hashValue].salesDate = orderTuple->salesDate;
-        salesDateEmployeeToCountHT[hashValue].employee = orderTuple->employee;
-      }
-    }
-    // Iterate through items to count how many rows have a particular pair
-    // (salesDate, employee) that can be merged with orders.
-    for (size_t i = 0; i < db->itemsCardinality; i++) {
-      struct ItemTuple* itemsTuple = &db->items[i];
-      int hashValue = hash2(itemsTuple->salesDate, itemsTuple->employee,
-                            salesDateEmployeeToCountCardinality);
-      while (salesDateEmployeeToCountHT[hashValue].count >= 0 &&
-             !(salesDateEmployeeToCountHT[hashValue].salesDate ==
-                   itemsTuple->salesDate &&
-               salesDateEmployeeToCountHT[hashValue].employee ==
-                   itemsTuple->employee)) {
-        hashValue =
-            nextSlotLinear(hashValue, salesDateEmployeeToCountCardinality);
-      }
-      if (salesDateEmployeeToCountHT[hashValue].count >= 0) {
-        salesDateEmployeeToCountHT[hashValue].count++;
-      }
-    }
-
-    indices->salesDateEmployeeToCountHT = salesDateEmployeeToCountHT;
-    indices->salesDateEmployeeToCountCardinality =
-        salesDateEmployeeToCountCardinality;
-  }
-
   db->indices = indices;
+
+  struct ThreadDataBuildIndex threadDataQ2 = {.db = db};
+  pthread_create(&threadDataQ2.tid, NULL, buildQ2Index, &threadDataQ2);
+  struct ThreadDataBuildIndex threadDataQ3 = {.db = db};
+  pthread_create(&threadDataQ3.tid, NULL, buildQ3Index, &threadDataQ3);
+
+  pthread_join(threadDataQ2.tid, NULL);
+  pthread_join(threadDataQ3.tid, NULL);
 }
 
 void DestroyIndices(struct Database* db) {
