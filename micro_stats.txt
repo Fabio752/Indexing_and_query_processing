@@ -1,28 +1,28 @@
 Let's keep our results separate, since our machines are different.
 
 Benchmark results Marco
-CreateIndicesBenchmark/1024          37.4 us         22.1 us        31809
-CreateIndicesBenchmark/4096          63.1 us         25.4 us        27966
-CreateIndicesBenchmark/32768          454 us         33.9 us        10000
-CreateIndicesBenchmark/262144        3816 us         54.7 us         1000
-CreateIndicesBenchmark/1048576      22861 us         76.1 us         1000
-Query1Benchmark/1024                  563 us          459 us         1641
-Query1Benchmark/4096                  642 us          489 us         1311
-Query1Benchmark/32768                1541 us          652 us         1037
-Query1Benchmark/262144               8241 us         1947 us          365
-Query1Benchmark/1048576             28992 us         6658 us           94
-Query2Benchmark/1024                  539 us          447 us         1577
-Query2Benchmark/4096                  554 us          460 us         1553
-Query2Benchmark/32768                 595 us          475 us         1393
-Query2Benchmark/262144                928 us          619 us         1154
-Query2Benchmark/524288               1055 us          540 us         1061
-Query3Benchmark/1024                  592 us          498 us         1289
-Query3Benchmark/4096                  618 us          507 us         1283
-Query3Benchmark/32768                 804 us          575 us         1164
-Query3Benchmark/262144               3425 us          796 us          868
+CreateIndicesBenchmark/1024          39.6 us         23.3 us        27498
+CreateIndicesBenchmark/4096          62.7 us         25.1 us        27771
+CreateIndicesBenchmark/32768          451 us         32.5 us        10000
+CreateIndicesBenchmark/262144        3797 us         52.1 us         1000
+CreateIndicesBenchmark/1048576      23161 us         80.1 us         1000
+Query1Benchmark/1024                  534 us          440 us         1355
+Query1Benchmark/4096                  666 us          511 us         1296
+Query1Benchmark/32768                1673 us          707 us          959
+Query1Benchmark/262144              10074 us         2260 us          327
+Query1Benchmark/1048576             28867 us         6682 us          102
+Query2Benchmark/1024                  551 us          464 us         1499
+Query2Benchmark/4096                  560 us          467 us         1370
+Query2Benchmark/32768                 595 us          477 us         1469
+Query2Benchmark/262144                766 us          506 us         1360
+Query2Benchmark/524288               1040 us          534 us         1246
+Query3Benchmark/1024                  589 us          499 us         1296
+Query3Benchmark/4096                  662 us          530 us         1282
+Query3Benchmark/32768                 841 us          601 us         1131
+Query3Benchmark/262144               3353 us          785 us          960
 
 Macro:
-queryMix/2097152      90027 us         5011 us          130
+queryMix/2097152      90488 us         5030 us          130
 
 
 Benchmark results Fabio

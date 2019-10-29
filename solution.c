@@ -59,7 +59,7 @@ struct ThreadDataQ2 {
 
 struct ThreadDataQ3 {
   struct Database* db;
-  int* hashTableStores;
+  int16_t* hashTableStores;  // Contains employeeManagerID, with max 1344.
   size_t sizeStores;
   size_t start;
   size_t end;
@@ -302,7 +302,7 @@ void* Q3ProbeOrders(void* args) {
       indices->salesDateEmployeeToCountHT;
   size_t salesDateEmployeeToCountCardinality =
       indices->salesDateEmployeeToCountCardinality;
-  int* hashTableStores = threadData->hashTableStores;
+  int16_t* hashTableStores = threadData->hashTableStores;
   size_t sizeStores = threadData->sizeStores;
 
   // Count tuples.
@@ -345,7 +345,7 @@ int Query3(struct Database* db, int countryID) {
   // The only hashed value is the employeeManagerID. If negative, the slot is
   // empty.
   size_t sizeStores = db->storesCardinality + 1;
-  int* hashTableStores = malloc(sizeStores * sizeof(int));
+  int16_t* hashTableStores = malloc(sizeStores * sizeof(int));
   if (hashTableStores == NULL) {
     exit(1);
   }
