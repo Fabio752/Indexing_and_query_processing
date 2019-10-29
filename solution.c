@@ -89,27 +89,27 @@ int nextSlotRehashed(int currentSlot, int size, int root) {
 void* Q1ProbeOrders(void* args) {
   // Count matching tuples.
   int result = 0;
-  struct ThreadDataQ1* threadData = (struct ThreadDataQ1*)args;
-  for (size_t i = threadData->start; i < threadData->end; i++) {
-    if (threadData->db->items[i].price >= threadData->price) {
+  struct ThreadDataQ1 threadData = *((struct ThreadDataQ1*)args);
+  for (size_t i = threadData.start; i < threadData.end; i++) {
+    if (threadData.db->items[i].price >= threadData.price) {
       continue;
     }
-    struct ItemTuple* itemTuple = &threadData->db->items[i];
+    struct ItemTuple* itemTuple = &threadData.db->items[i];
 
     int hashValue = hash(itemTuple->salesDate + itemTuple->employee,
-                         threadData->ordersHashTableSize);
-    while (threadData->ordersHashTable[hashValue].count >= 0 &&
-           !(threadData->ordersHashTable[hashValue].salesDate ==
+                         threadData.ordersHashTableSize);
+    while (threadData.ordersHashTable[hashValue].count >= 0 &&
+           !(threadData.ordersHashTable[hashValue].salesDate ==
                  itemTuple->salesDate &&
-             threadData->ordersHashTable[hashValue].employee ==
+             threadData.ordersHashTable[hashValue].employee ==
                  itemTuple->employee)) {
-      hashValue = nextSlotLinear(hashValue, threadData->ordersHashTableSize);
+      hashValue = nextSlotLinear(hashValue, threadData.ordersHashTableSize);
     }
-    if (threadData->ordersHashTable[hashValue].count >= 0) {
-      result += threadData->ordersHashTable[hashValue].count;
+    if (threadData.ordersHashTable[hashValue].count >= 0) {
+      result += threadData.ordersHashTable[hashValue].count;
     }
   }
-  threadData->result = result;
+  ((struct ThreadDataQ1*)args)->result = result;
   return NULL;
 }
 
