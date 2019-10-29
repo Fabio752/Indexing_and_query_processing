@@ -96,7 +96,7 @@ void* Q1ProbeOrders(void* args) {
     }
     struct ItemTuple* itemTuple = &threadData->db->items[i];
 
-    int hashValue = hash(itemTuple->salesDate * itemTuple->employee,
+    int hashValue = hash(itemTuple->salesDate + itemTuple->employee,
                          threadData->ordersHashTableSize);
     while (threadData->ordersHashTable[hashValue].count >= 0 &&
            !(threadData->ordersHashTable[hashValue].salesDate ==
@@ -135,7 +135,7 @@ int Query1(struct Database* db, int managerID, int price) {
       continue;
     }
     int hashValue =
-        hash(orderTuple->salesDate * orderTuple->employee, ordersHashTableSize);
+        hash(orderTuple->salesDate + orderTuple->employee, ordersHashTableSize);
     while (ordersHashTable[hashValue].count >= 0 &&
            !(ordersHashTable[hashValue].salesDate == orderTuple->salesDate &&
              ordersHashTable[hashValue].employee == orderTuple->employee)) {
