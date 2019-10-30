@@ -548,7 +548,7 @@ void* buildQ3Index(void* args) {
   struct Database* db = threadData->db;
 
   // TODO: try different size.
-  size_t salesDateEmployeeToCountCardinality = db->ordersCardinality * 2;
+  size_t salesDateEmployeeToCountCardinality = db->ordersCardinality + 1;
   struct SalesDateEmployeeToCount* salesDateEmployeeToCountHT =
       malloc(salesDateEmployeeToCountCardinality *
              sizeof(struct SalesDateEmployeeToCount));
