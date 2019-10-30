@@ -26,23 +26,25 @@ queryMix/2097152      90488 us         5030 us          130
 
 
 Benchmark results Fabio
-CreateIndicesBenchmark/1024          8.77 us         8.78 us        76038
-CreateIndicesBenchmark/4096           232 us          232 us         3216
-CreateIndicesBenchmark/32768          297 us          297 us         2353
-CreateIndicesBenchmark/262144        2737 us         2738 us          249
-CreateIndicesBenchmark/1048576      16105 us        16107 us           44
-Query1Benchmark/1024                  834 us          834 us          817
-Query1Benchmark/4096                 3054 us         3054 us          229
-Query1Benchmark/32768               15947 us        15946 us           44
-Query1Benchmark/262144             138620 us       138594 us            6
-Query1Benchmark/1048576            553225 us       553214 us            1
-Query2Benchmark/1024                 1.74 us         1.74 us       405898
-Query2Benchmark/4096                 7.21 us         7.21 us        95468
-Query2Benchmark/32768                50.7 us         50.7 us        13531
-Query2Benchmark/262144                304 us          304 us         2308
-Query2Benchmark/524288                575 us          575 us         1143
-Query3Benchmark/1024                 1659 us         1658 us          422
-Query3Benchmark/4096                 5851 us         5851 us          117
-Query3Benchmark/32768               31945 us        31940 us           22
-Query3Benchmark/262144             254977 us       254961 us            3
-fabio@FabiosTh
+CreateIndicesBenchmark/1024          33.5 us         20.1 us        33753
+CreateIndicesBenchmark/4096          55.4 us         20.5 us        33645
+CreateIndicesBenchmark/32768         1067 us          126 us         5826
+CreateIndicesBenchmark/262144        4352 us         79.2 us         1000
+CreateIndicesBenchmark/1048576      15557 us         87.3 us         1000
+Query1Benchmark/1024                  432 us          356 us         2048
+Query1Benchmark/4096                  493 us          368 us         1779
+Query1Benchmark/32768                1129 us          449 us         1549
+Query1Benchmark/262144               5897 us         1563 us          447
+Query1Benchmark/1048576             21159 us         4277 us          164
+Query2Benchmark/1024                  412 us          342 us         1925
+Query2Benchmark/4096                  421 us          350 us         1775
+Query2Benchmark/32768                 438 us          353 us         1981
+Query2Benchmark/262144                557 us          359 us         1936
+Query2Benchmark/524288                705 us          355 us         1880
+Query3Benchmark/1024                  455 us          378 us         1813
+Query3Benchmark/4096                  451 us          376 us         1868
+Query3Benchmark/32768                 535 us          375 us         1639
+Query3Benchmark/262144               1474 us          438 us         1566
+
+Macro:
+queryMix/2097152      74132 us         3847 us          100
