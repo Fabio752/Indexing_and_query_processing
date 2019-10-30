@@ -9,7 +9,7 @@
 // DEBUG
 #include <time.h>
 
-#define NUMBER_OF_THREADS 6  // We have 4 cores.
+#define NUMBER_OF_THREADS 4  // We have 4 cores.
 
 struct RLEDate {
   uint16_t date;
@@ -96,7 +96,7 @@ void* Q1ProbeOrders(void* args) {
   // Count matching tuples.
   int result = 0;
   struct ThreadDataQ1 threadData = *((struct ThreadDataQ1*)args);
-  for (size_t i = threadData.start; i < threadData.end; i++) {
+  for (size_t i = threadData.start; i < threadData.end; ++i) {
     if (threadData.db->items[i].price >= threadData.price) {
       continue;
     }
@@ -130,12 +130,12 @@ int Query1(struct Database* db, int managerID, int price) {
   }
 
   // Initialize all slots to be empty. Slow.
-  for (size_t i = 0; i < ordersHashTableSize; i++) {
+  for (size_t i = 0; i < ordersHashTableSize; ++i) {
     ordersHashTable[i].count = -1;
   }
 
   // Build orders hash table.
-  for (size_t i = 0; i < db->ordersCardinality; i++) {
+  for (size_t i = 0; i < db->ordersCardinality; ++i) {
     struct OrderTuple* orderTuple = &db->orders[i];
     if (orderTuple->employeeManagerID != managerID) {
       continue;
@@ -156,14 +156,14 @@ int Query1(struct Database* db, int managerID, int price) {
       // We already have inserted the pair (salesDate, employee) in the
       // table, so we don't need to add it again. This also guarantees the
       // uniqueness in the keys of the table.
-      ordersHashTable[hashValue].count++;
+      ++ordersHashTable[hashValue].count;
     }
   }
 
   // Parallelize probing using threads.
   struct ThreadDataQ1 threadData[NUMBER_OF_THREADS];
   // Split the ranges.
-  for (size_t i = 0; i < NUMBER_OF_THREADS; i++) {
+  for (size_t i = 0; i < NUMBER_OF_THREADS; ++i) {
     threadData[i] = (struct ThreadDataQ1){
         .db = db,                            // Shared.
         .ordersHashTable = ordersHashTable,  // Shared.
@@ -176,13 +176,13 @@ int Query1(struct Database* db, int managerID, int price) {
       db->itemsCardinality;  // Make sure we cover the entire range.
 
   // Start threads.
-  for (int i = 0; i < NUMBER_OF_THREADS; i++) {
+  for (int i = 0; i < NUMBER_OF_THREADS; ++i) {
     pthread_create(&threadData[i].tid, NULL, Q1ProbeOrders, &threadData[i]);
   }
 
   int tuplesCount = 0;
   // Join threads.
-  for (int i = 0; i < NUMBER_OF_THREADS; i++) {
+  for (int i = 0; i < NUMBER_OF_THREADS; ++i) {
     pthread_join(threadData[i].tid, NULL);
     tuplesCount += threadData[i].result;
   }
@@ -201,7 +201,7 @@ void* Q2ProbeOrders(void* args) {
   int date = threadData->date;
 
   int tuplesCount = 0;
-  for (size_t i = threadData->start; i < threadData->end; i++) {
+  for (size_t i = threadData->start; i < threadData->end; ++i) {
     if (db->orders[i].discount != discount) {
       continue;
     }
@@ -268,7 +268,7 @@ int Query2(struct Database* db, int discount, int date) {
   // Parallelize probing using threads.
   struct ThreadDataQ2 threadData[NUMBER_OF_THREADS];
   // Split the ranges.
-  for (size_t i = 0; i < NUMBER_OF_THREADS; i++) {
+  for (size_t i = 0; i < NUMBER_OF_THREADS; ++i) {
     threadData[i] = (struct ThreadDataQ2){
         .db = db,  // Shared.
         .discount = discount,
@@ -280,13 +280,13 @@ int Query2(struct Database* db, int discount, int date) {
       db->ordersCardinality;  // Make sure we cover the entire range.
 
   // Start threads.
-  for (int i = 0; i < NUMBER_OF_THREADS; i++) {
+  for (int i = 0; i < NUMBER_OF_THREADS; ++i) {
     pthread_create(&threadData[i].tid, NULL, Q2ProbeOrders, &threadData[i]);
   }
 
   int tuplesCount = 0;
   // Join threads.
-  for (int i = 0; i < NUMBER_OF_THREADS; i++) {
+  for (int i = 0; i < NUMBER_OF_THREADS; ++i) {
     pthread_join(threadData[i].tid, NULL);
     tuplesCount += threadData[i].result;
   }
@@ -308,7 +308,7 @@ void* Q3ProbeOrders(void* args) {
   // Count tuples.
   int tuplesCount = 0;
 
-  for (size_t i = threadData->start; i < threadData->end; i++) {
+  for (size_t i = threadData->start; i < threadData->end; ++i) {
     struct OrderTuple* orderTuple = &db->orders[i];
     int hashValueStores = hash(orderTuple->employeeManagerID, sizeStores);
     while (hashTableStores[hashValueStores] >= 0) {
@@ -351,11 +351,11 @@ int Query3(struct Database* db, int countryID) {
   }
 
   // Initialize all slots to be empty. Slow.
-  for (size_t i = 0; i < sizeStores; i++) {
+  for (size_t i = 0; i < sizeStores; ++i) {
     hashTableStores[i] = -1;
   }
   // Populate Store hash table.
-  for (size_t i = 0; i < db->storesCardinality; i++) {
+  for (size_t i = 0; i < db->storesCardinality; ++i) {
     struct StoreTuple* buildInput = &db->stores[i];
     if (buildInput->countryID != countryID) {
       continue;
@@ -372,7 +372,7 @@ int Query3(struct Database* db, int countryID) {
   // Parallelize probing using threads.
   struct ThreadDataQ3 threadData[NUMBER_OF_THREADS];
   // Split the ranges.
-  for (size_t i = 0; i < NUMBER_OF_THREADS; i++) {
+  for (size_t i = 0; i < NUMBER_OF_THREADS; ++i) {
     threadData[i] = (struct ThreadDataQ3){
         .db = db,                            // Shared.
         .hashTableStores = hashTableStores,  // Shared.
@@ -384,13 +384,13 @@ int Query3(struct Database* db, int countryID) {
       db->ordersCardinality;  // Make sure we cover the entire range.
 
   // Start threads.
-  for (int i = 0; i < NUMBER_OF_THREADS; i++) {
+  for (int i = 0; i < NUMBER_OF_THREADS; ++i) {
     pthread_create(&threadData[i].tid, NULL, Q3ProbeOrders, &threadData[i]);
   }
 
   int tuplesCount = 0;
   // Join threads.
-  for (int i = 0; i < NUMBER_OF_THREADS; i++) {
+  for (int i = 0; i < NUMBER_OF_THREADS; ++i) {
     pthread_join(threadData[i].tid, NULL);
     tuplesCount += threadData[i].result;
   }
@@ -413,14 +413,14 @@ struct RLEDate* computeRLEDatesCountingSort(struct Database* db, size_t maximum,
     exit(1);
   }
   // Initialize frequencies to zero.
-  for (size_t i = 0; i <= (size_t)maximum; i++) {
+  for (size_t i = 0; i <= (size_t)maximum; ++i) {
     frequencyCount[i] = 0;
   }
   // Count frequencies, and how many different values are there.
   size_t different = 0;
-  for (size_t i = 0; i < db->itemsCardinality; i++) {
+  for (size_t i = 0; i < db->itemsCardinality; ++i) {
     different += frequencyCount[db->items[i].salesDate] == 0;
-    frequencyCount[db->items[i].salesDate]++;
+    ++frequencyCount[db->items[i].salesDate];
   }
 
   // Compute Run-Length-Encoding with Length Prefix Summing.
@@ -430,12 +430,12 @@ struct RLEDate* computeRLEDatesCountingSort(struct Database* db, size_t maximum,
   }
   size_t RLEIndex = 0;
   int prefixCount = 0;
-  for (size_t i = 0; i <= (size_t)maximum; i++) {
+  for (size_t i = 0; i <= (size_t)maximum; ++i) {
     if (frequencyCount[i] > 0) {
       prefixCount += frequencyCount[i];
       RLEDates[RLEIndex].date = i;
       RLEDates[RLEIndex].prefixCount = prefixCount;
-      RLEIndex++;
+      ++RLEIndex;
     }
   }
   free(frequencyCount);
@@ -454,7 +454,7 @@ struct RLEDate* computeRLEDatesQSort(struct Database* db,
     exit(1);
   }
   // Etract dates.
-  for (size_t i = 0; i < db->itemsCardinality; i++) {
+  for (size_t i = 0; i < db->itemsCardinality; ++i) {
     orderedItemSalesDate[i] = db->items[i].salesDate;
   }
   // Sort dates.
@@ -462,9 +462,9 @@ struct RLEDate* computeRLEDatesQSort(struct Database* db,
 
   // Find how many different elements are there.
   size_t different = 1;
-  for (size_t i = 1; i < db->itemsCardinality; i++) {
+  for (size_t i = 1; i < db->itemsCardinality; ++i) {
     if (orderedItemSalesDate[i] > orderedItemSalesDate[i - 1]) {
-      different++;
+      ++different;
     }
   }
 
@@ -474,11 +474,11 @@ struct RLEDate* computeRLEDatesQSort(struct Database* db,
     exit(1);
   }
   size_t RLEIndex = 0;
-  for (size_t i = 1; i < db->itemsCardinality; i++) {
+  for (size_t i = 1; i < db->itemsCardinality; ++i) {
     if (orderedItemSalesDate[i] > orderedItemSalesDate[i - 1]) {
       RLEDates[RLEIndex].date = orderedItemSalesDate[i - 1];
       RLEDates[RLEIndex].prefixCount = i;
-      RLEIndex++;
+      ++RLEIndex;
     }
   }
   // Add last elements.
@@ -504,7 +504,7 @@ void* buildQ2Index(void* args) {
 
   int minimum = __INT_MAX__;
   int maximum = -1;
-  for (size_t i = 0; i < db->itemsCardinality; i++) {
+  for (size_t i = 0; i < db->itemsCardinality; ++i) {
     if (db->items[i].salesDate < minimum) {
       minimum = db->items[i].salesDate;
     }
@@ -556,10 +556,10 @@ void* buildQ3Index(void* args) {
   if (salesDateEmployeeToCountHT == NULL) {
     exit(1);
   }
-  for (size_t i = 0; i < salesDateEmployeeToCountCardinality; i++) {
+  for (size_t i = 0; i < salesDateEmployeeToCountCardinality; ++i) {
     salesDateEmployeeToCountHT[i].count = -1;
   }
-  for (size_t i = 0; i < db->ordersCardinality; i++) {
+  for (size_t i = 0; i < db->ordersCardinality; ++i) {
     struct OrderTuple* orderTuple = &db->orders[i];
     int hashValue = hash2(orderTuple->salesDate, orderTuple->employee,
                           salesDateEmployeeToCountCardinality);
@@ -583,7 +583,7 @@ void* buildQ3Index(void* args) {
   }
   // Iterate through items to count how many rows have a particular pair
   // (salesDate, employee) that can be merged with orders.
-  for (size_t i = 0; i < db->itemsCardinality; i++) {
+  for (size_t i = 0; i < db->itemsCardinality; ++i) {
     struct ItemTuple* itemsTuple = &db->items[i];
     int hashValue = hash2(itemsTuple->salesDate, itemsTuple->employee,
                           salesDateEmployeeToCountCardinality);
@@ -595,9 +595,8 @@ void* buildQ3Index(void* args) {
       hashValue =
           nextSlotLinear(hashValue, salesDateEmployeeToCountCardinality);
     }
-    if (salesDateEmployeeToCountHT[hashValue].count >= 0) {
-      salesDateEmployeeToCountHT[hashValue].count++;
-    }
+    salesDateEmployeeToCountHT[hashValue].count +=
+        salesDateEmployeeToCountHT[hashValue].count >= 0;
   }
 
   struct Indices* indices = db->indices;
