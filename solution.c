@@ -135,7 +135,7 @@ int Query1(struct Database* db, int managerID, int price) {
          ordersHashTableSize * sizeof(struct OrdersHashTableSlot));
 
   // Build orders hash table.
-  for (size_t i = 0; i < db->ordersCardinality; ++i) {
+  for (int i = (int)db->ordersCardinality - 1; i >= 0; --i) {
     struct OrderTuple* orderTuple = &db->orders[i];
     if (orderTuple->employeeManagerID != managerID) {
       continue;
@@ -412,11 +412,11 @@ struct RLEDate* computeRLEDatesCountingSort(struct Database* db, size_t maximum,
     exit(1);
   }
   // Initialize frequencies to zero.
-  memset(frequencyCount, 0, ((size_t)maximum + 1) * sizeof(int));
+  memset(frequencyCount, 0, (maximum + 1) * sizeof(int));
 
   // Count frequencies, and how many different values are there.
   size_t different = 0;
-  for (size_t i = 0; i < db->itemsCardinality; ++i) {
+  for (int i = (int)db->itemsCardinality - 1; i >= 0; --i) {
     different += frequencyCount[db->items[i].salesDate] == 0;
     ++frequencyCount[db->items[i].salesDate];
   }
@@ -428,7 +428,7 @@ struct RLEDate* computeRLEDatesCountingSort(struct Database* db, size_t maximum,
   }
   size_t RLEIndex = 0;
   int prefixCount = 0;
-  for (size_t i = 0; i <= (size_t)maximum; ++i) {
+  for (size_t i = 0; i <= maximum; ++i) {
     if (frequencyCount[i] > 0) {
       prefixCount += frequencyCount[i];
       RLEDates[RLEIndex].date = i;
@@ -502,7 +502,7 @@ void* buildQ2Index(void* args) {
 
   int minimum = __INT_MAX__;
   int maximum = -1;
-  for (size_t i = 0; i < db->itemsCardinality; ++i) {
+  for (int i = (int)db->itemsCardinality - 1; i >= 0; --i) {
     if (db->items[i].salesDate < minimum) {
       minimum = db->items[i].salesDate;
     }
@@ -559,7 +559,7 @@ void* buildQ3Index(void* args) {
          salesDateEmployeeToCountCardinality *
              sizeof(struct SalesDateEmployeeToCount));
 
-  for (size_t i = 0; i < db->ordersCardinality; ++i) {
+  for (int i = (int)db->ordersCardinality - 1; i >= 0; --i) {
     struct OrderTuple* orderTuple = &db->orders[i];
     int hashValue = hash2(orderTuple->salesDate, orderTuple->employee,
                           salesDateEmployeeToCountCardinality);
@@ -583,7 +583,7 @@ void* buildQ3Index(void* args) {
   }
   // Iterate through items to count how many rows have a particular pair
   // (salesDate, employee) that can be merged with orders.
-  for (size_t i = 0; i < db->itemsCardinality; ++i) {
+  for (int i = db->itemsCardinality - 1; i >= 0; --i) {
     struct ItemTuple* itemsTuple = &db->items[i];
     int hashValue = hash2(itemsTuple->salesDate, itemsTuple->employee,
                           salesDateEmployeeToCountCardinality);
