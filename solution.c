@@ -9,7 +9,7 @@
 // DEBUG
 #include <time.h>
 
-#define NUMBER_OF_THREADS 4  // We have 4 cores.
+#define NUMBER_OF_THREADS 6  // We have 4 cores.
 
 struct RLEDate {
   uint16_t date;
