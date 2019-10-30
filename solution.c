@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "solution.h"
 
@@ -129,10 +130,9 @@ int Query1(struct Database* db, int managerID, int price) {
     exit(1);
   }
 
-  // Initialize all slots to be empty. Slow.
-  for (size_t i = 0; i < ordersHashTableSize; ++i) {
-    ordersHashTable[i].count = -1;
-  }
+  // Initialize all slots to be empty.
+  memset(ordersHashTable, -1,
+         ordersHashTableSize * sizeof(struct OrdersHashTableSlot));
 
   // Build orders hash table.
   for (size_t i = 0; i < db->ordersCardinality; ++i) {
@@ -345,15 +345,14 @@ int Query3(struct Database* db, int countryID) {
   // The only hashed value is the employeeManagerID. If negative, the slot is
   // empty.
   size_t sizeStores = db->storesCardinality + 1;
-  int16_t* hashTableStores = malloc(sizeStores * sizeof(int));
+  int16_t* hashTableStores = malloc(sizeStores * sizeof(int16_t));
   if (hashTableStores == NULL) {
     exit(1);
   }
 
-  // Initialize all slots to be empty. Slow.
-  for (size_t i = 0; i < sizeStores; ++i) {
-    hashTableStores[i] = -1;
-  }
+  // Initialize all slots to be empty.
+  memset(hashTableStores, -1, sizeStores * sizeof(int16_t));
+
   // Populate Store hash table.
   for (size_t i = 0; i < db->storesCardinality; ++i) {
     struct StoreTuple* buildInput = &db->stores[i];
@@ -413,9 +412,8 @@ struct RLEDate* computeRLEDatesCountingSort(struct Database* db, size_t maximum,
     exit(1);
   }
   // Initialize frequencies to zero.
-  for (size_t i = 0; i <= (size_t)maximum; ++i) {
-    frequencyCount[i] = 0;
-  }
+  memset(frequencyCount, 0, ((size_t)maximum + 1) * sizeof(int));
+
   // Count frequencies, and how many different values are there.
   size_t different = 0;
   for (size_t i = 0; i < db->itemsCardinality; ++i) {
@@ -549,6 +547,7 @@ void* buildQ3Index(void* args) {
   struct ThreadDataBuildIndex* threadData = (struct ThreadDataBuildIndex*)args;
   struct Database* db = threadData->db;
 
+  // TODO: try different size.
   size_t salesDateEmployeeToCountCardinality = db->ordersCardinality * 2;
   struct SalesDateEmployeeToCount* salesDateEmployeeToCountHT =
       malloc(salesDateEmployeeToCountCardinality *
@@ -556,9 +555,10 @@ void* buildQ3Index(void* args) {
   if (salesDateEmployeeToCountHT == NULL) {
     exit(1);
   }
-  for (size_t i = 0; i < salesDateEmployeeToCountCardinality; ++i) {
-    salesDateEmployeeToCountHT[i].count = -1;
-  }
+  memset(salesDateEmployeeToCountHT, -1,
+         salesDateEmployeeToCountCardinality *
+             sizeof(struct SalesDateEmployeeToCount));
+
   for (size_t i = 0; i < db->ordersCardinality; ++i) {
     struct OrderTuple* orderTuple = &db->orders[i];
     int hashValue = hash2(orderTuple->salesDate, orderTuple->employee,
