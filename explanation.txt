@@ -1,6 +1,6 @@
 Group members: Fabio Deo, Marco Selvatici. (Nutty Lens Personality)
 
-Score in the competition: 523614 // UPDATE THIS
+Score in the competition: 383553 us
 
 INTRODUCTION
 There will be a brief section for each query, explaining how the idea works.

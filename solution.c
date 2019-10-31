@@ -74,13 +74,13 @@ struct ThreadDataBuildIndex {
 };
 
 // TODO: improve has function to something better (search online).
-inline int hash(int value, int size) { return value % size; }
+int hash(int value, int size) { return value % size; }
 
-inline int hash2(int value1, int value2, int size) {
+int hash2(int value1, int value2, int size) {
   return ((223 + value1) * (47 + value2)) % size;
 }
 
-inline int nextSlotLinear(int currentSlot, int size) {
+int nextSlotLinear(int currentSlot, int size) {
   return (currentSlot + 1) % size;
 }
 
