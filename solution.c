@@ -73,6 +73,10 @@ struct ThreadDataBuildIndex {
   pthread_t tid;
 };
 
+extern inline int hash(int, int);
+extern inline int hash2(int, int, int);
+extern inline int nextSlotLinear(int, int);
+
 // TODO: improve has function to something better (search online).
 inline int hash(int value, int size) { return value % size; }
 
