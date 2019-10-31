@@ -74,13 +74,13 @@ struct ThreadDataBuildIndex {
 };
 
 // TODO: improve has function to something better (search online).
-int hash(int value, int size) { return value % size; }
+inline int hash(int value, int size) { return value % size; }
 
-int hash2(int value1, int value2, int size) {
+inline int hash2(int value1, int value2, int size) {
   return ((223 + value1) * (47 + value2)) % size;
 }
 
-int nextSlotLinear(int currentSlot, int size) {
+inline int nextSlotLinear(int currentSlot, int size) {
   return (currentSlot + 1) % size;
 }
 
@@ -548,7 +548,7 @@ void* buildQ3Index(void* args) {
   struct Database* db = threadData->db;
 
   // TODO: try different size.
-  size_t salesDateEmployeeToCountCardinality = db->ordersCardinality + 1;
+  size_t salesDateEmployeeToCountCardinality = db->ordersCardinality * 2;
   struct SalesDateEmployeeToCount* salesDateEmployeeToCountHT =
       malloc(salesDateEmployeeToCountCardinality *
              sizeof(struct SalesDateEmployeeToCount));
