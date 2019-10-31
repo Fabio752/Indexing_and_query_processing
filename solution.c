@@ -73,24 +73,26 @@ struct ThreadDataBuildIndex {
   pthread_t tid;
 };
 
-// TODO: improve has function to something better (search online).
-int hash(int value, int size) { return value % size; }
+int hash(int value, int size) { return value & (size - 1); }
 
 int hash2(int value1, int value2, int size) {
-  return ((223 + value1) * (47 + value2)) % size;
+  return ((223 + value1) * (47 + value2)) & (size - 1);
 }
 
 int nextSlotLinear(int currentSlot, int size) {
+  return (currentSlot + 1) & (size - 1);
+}
+int nextSlotLinearSlow(int currentSlot, int size) {
   return (currentSlot + 1) % size;
 }
 
 int nextSlotExpo(int currentSlot, int size, int backOff) {
-  return (currentSlot + backOff) % size;
+  return (currentSlot + backOff) & (size - 1);
 }
 
 int nextSlotRehashed(int currentSlot, int size, int root) {
   if (currentSlot == 0) return root;
-  return (currentSlot * root) % size;
+  return (currentSlot * root) & (size - 1);
 }
 
 void* Q1ProbeOrders(void* args) {
@@ -123,7 +125,7 @@ void* Q1ProbeOrders(void* args) {
 int Query1(struct Database* db, int managerID, int price) {
   // TODO: use some indexing to speed this up. E.g. maybe sort items by price?
   // E.g. maybe prebuild ordersHashTableSize?
-  size_t ordersHashTableSize = db->ordersCardinality + 1;
+  size_t ordersHashTableSize = db->ordersCardinality;
   struct OrdersHashTableSlot* ordersHashTable =
       malloc(ordersHashTableSize * sizeof(struct OrdersHashTableSlot));
   if (ordersHashTable == NULL) {
@@ -333,7 +335,7 @@ void* Q3ProbeOrders(void* args) {
               salesDateEmployeeToCountHT[hashValueSalesDateEmployee].count;
         }
       }
-      hashValueStores = nextSlotLinear(hashValueStores, sizeStores);
+      hashValueStores = nextSlotLinearSlow(hashValueStores, sizeStores);
     }
   }
   threadData->result = tuplesCount;
@@ -344,7 +346,7 @@ int Query3(struct Database* db, int countryID) {
   // Build Stores hash table.
   // The only hashed value is the employeeManagerID. If negative, the slot is
   // empty.
-  size_t sizeStores = db->storesCardinality + 1;
+  size_t sizeStores = db->storesCardinality * 2;
   int16_t* hashTableStores = malloc(sizeStores * sizeof(int16_t));
   if (hashTableStores == NULL) {
     exit(1);
@@ -361,7 +363,7 @@ int Query3(struct Database* db, int countryID) {
     }
     int hashValue = hash(buildInput->managerID, sizeStores);
     while (hashTableStores[hashValue] >= 0) {
-      hashValue = nextSlotLinear(hashValue, sizeStores);
+      hashValue = nextSlotLinearSlow(hashValue, sizeStores);
       // hashValue = nextSlotExpo(hashValue, sizeStores, backOff);
       // hashValue = nextSlotRehashed(hashValue, sizeStores);
     }
