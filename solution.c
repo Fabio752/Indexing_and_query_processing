@@ -35,6 +35,10 @@ struct Indices {
 
   struct SalesDateEmployeeToCount* salesDateEmployeeToCountHT;
   size_t salesDateEmployeeToCountCardinality;
+
+  struct ItemTuple** partitionedItems;
+  size_t partitionedItemsCardinality;
+  size_t indexes[NUMBER_OF_THREADS];
 };
 
 struct ThreadDataQ1 {
@@ -42,8 +46,7 @@ struct ThreadDataQ1 {
   struct OrdersHashTableSlot* ordersHashTable;
   size_t ordersHashTableSize;
   int price;
-  size_t start;
-  size_t end;
+  int threadNumber;
   int result;
   pthread_t tid;
 };
@@ -95,16 +98,17 @@ int nextSlotRehashed(int currentSlot, int size, int root) {
   return (currentSlot * root) & (size - 1);
 }
 
-void* Q1ProbeOrders(void* args) {
+void* Q1BuildProbeOrders(void* args) {
   // Count matching tuples.
   int result = 0;
   struct ThreadDataQ1 threadData = *((struct ThreadDataQ1*)args);
-  for (size_t i = threadData.start; i < threadData.end; ++i) {
-    if (threadData.db->items[i].price >= threadData.price) {
+  struct Indices* indices = threadData.db->indices;
+  struct ItemTuple* items = indices->partitionedItems[threadData.threadNumber];
+  for (size_t i = 0; i < indices->indexes[threadData.threadNumber]; ++i) {
+    if (items[i].price >= threadData.price) {
       continue;
     }
-    struct ItemTuple* itemTuple = &threadData.db->items[i];
-
+    struct ItemTuple* itemTuple = &items[i];
     int hashValue = hash(itemTuple->salesDate + itemTuple->employee,
                          threadData.ordersHashTableSize);
     while (threadData.ordersHashTable[hashValue].count >= 0 &&
@@ -125,16 +129,22 @@ void* Q1ProbeOrders(void* args) {
 int Query1(struct Database* db, int managerID, int price) {
   // TODO: use some indexing to speed this up. E.g. maybe sort items by price?
   // E.g. maybe prebuild ordersHashTableSize?
-  size_t ordersHashTableSize = db->ordersCardinality;
-  struct OrdersHashTableSlot* ordersHashTable =
-      malloc(ordersHashTableSize * sizeof(struct OrdersHashTableSlot));
-  if (ordersHashTable == NULL) {
+  size_t ordersHashTableSize = db->ordersCardinality / NUMBER_OF_THREADS;
+  struct OrdersHashTableSlot** partitionedOrdersHashTable =
+      malloc(NUMBER_OF_THREADS * sizeof(struct OrdersHashTableSlot*));
+      
+  for(int i = 0 ; i < NUMBER_OF_THREADS; i++){
+    partitionedOrdersHashTable[i] = malloc(ordersHashTableSize * sizeof(struct OrdersHashTableSlot));
+  }
+  if (partitionedOrdersHashTable == NULL) {
     exit(1);
   }
 
   // Initialize all slots to be empty.
-  memset(ordersHashTable, -1,
-         ordersHashTableSize * sizeof(struct OrdersHashTableSlot));
+  for(int i = 0; i < NUMBER_OF_THREADS; i++){
+    memset(partitionedOrdersHashTable[i], -1,
+           ordersHashTableSize * sizeof(struct OrdersHashTableSlot));
+  }
 
   // Build orders hash table.
   for (size_t i = 0; i < db->ordersCardinality; ++i) {
@@ -142,23 +152,24 @@ int Query1(struct Database* db, int managerID, int price) {
     if (orderTuple->employeeManagerID != managerID) {
       continue;
     }
+    int tableOffset = (orderTuple->salesDate + orderTuple->employee) & 3;
     int hashValue =
         hash(orderTuple->salesDate + orderTuple->employee, ordersHashTableSize);
-    while (ordersHashTable[hashValue].count >= 0 &&
-           !(ordersHashTable[hashValue].salesDate == orderTuple->salesDate &&
-             ordersHashTable[hashValue].employee == orderTuple->employee)) {
+    while (partitionedOrdersHashTable[tableOffset][hashValue].count >= 0 &&
+           !(partitionedOrdersHashTable[tableOffset][hashValue].salesDate == orderTuple->salesDate &&
+             partitionedOrdersHashTable[tableOffset][hashValue].employee == orderTuple->employee)) {
       hashValue = nextSlotLinear(hashValue, ordersHashTableSize);
     }
-    if (ordersHashTable[hashValue].count < 0) {
+    if (partitionedOrdersHashTable[tableOffset][hashValue].count < 0) {
       // Add new (salesDate, employee) pair.
-      ordersHashTable[hashValue].count = 1;
-      ordersHashTable[hashValue].salesDate = orderTuple->salesDate;
-      ordersHashTable[hashValue].employee = orderTuple->employee;
+      partitionedOrdersHashTable[tableOffset][hashValue].count = 1;
+      partitionedOrdersHashTable[tableOffset][hashValue].salesDate = orderTuple->salesDate;
+      partitionedOrdersHashTable[tableOffset][hashValue].employee = orderTuple->employee;
     } else {
       // We already have inserted the pair (salesDate, employee) in the
       // table, so we don't need to add it again. This also guarantees the
       // uniqueness in the keys of the table.
-      ++ordersHashTable[hashValue].count;
+      ++partitionedOrdersHashTable[tableOffset][hashValue].count;
     }
   }
 
@@ -168,18 +179,15 @@ int Query1(struct Database* db, int managerID, int price) {
   for (size_t i = 0; i < NUMBER_OF_THREADS; ++i) {
     threadData[i] = (struct ThreadDataQ1){
         .db = db,                            // Shared.
-        .ordersHashTable = ordersHashTable,  // Shared.
+        .ordersHashTable = partitionedOrdersHashTable[i],  // Shared.
         .ordersHashTableSize = ordersHashTableSize,
         .price = price,
-        .start = i * db->itemsCardinality / NUMBER_OF_THREADS,
-        .end = (i + 1) * db->itemsCardinality / NUMBER_OF_THREADS};
+        .threadNumber = i
+    };
   }
-  threadData[NUMBER_OF_THREADS - 1].end =
-      db->itemsCardinality;  // Make sure we cover the entire range.
-
   // Start threads.
   for (int i = 0; i < NUMBER_OF_THREADS; ++i) {
-    pthread_create(&threadData[i].tid, NULL, Q1ProbeOrders, &threadData[i]);
+    pthread_create(&threadData[i].tid, NULL, Q1BuildProbeOrders, &threadData[i]);
   }
 
   int tuplesCount = 0;
@@ -189,7 +197,7 @@ int Query1(struct Database* db, int managerID, int price) {
     tuplesCount += threadData[i].result;
   }
 
-  free(ordersHashTable);
+  free(partitionedOrdersHashTable);
 
   return tuplesCount;
 }
@@ -491,6 +499,38 @@ struct RLEDate* computeRLEDatesQSort(struct Database* db,
   return RLEDates;
 }
 
+void* buildQ1Index(void* args) {
+  // Create indices for query 1.
+  struct ThreadDataBuildIndex* threadData = (struct ThreadDataBuildIndex*)args;
+  struct Database* db = threadData->db;
+
+ // TODO: try different size.
+  size_t partitionedItemsCardinality = db->itemsCardinality / 2;
+  struct ItemTuple** items = malloc(NUMBER_OF_THREADS * sizeof(struct ItemTuple*));
+  for (int i = 0; i < NUMBER_OF_THREADS; ++i){
+    items[i] = malloc(partitionedItemsCardinality * sizeof(struct ItemTuple));
+  }
+  if (items == NULL) {
+    exit(1);
+  }
+  size_t indexes[NUMBER_OF_THREADS] = {0, 0, 0, 0};
+  for (size_t i = 0; i < partitionedItemsCardinality; ++i){
+    int tableOffset = (db->items[i].salesDate + db->items[i].employee) & 3;  
+    items[tableOffset][indexes[tableOffset]] = db->items[i];
+    ++indexes[tableOffset];
+  }
+  
+  struct Indices* indices = db->indices;
+  indices->partitionedItemsCardinality = partitionedItemsCardinality;
+  indices->partitionedItems = items;
+  indices->indexes[0] = indexes[0];
+  indices->indexes[1] = indexes[1];
+  indices->indexes[2] = indexes[2];
+  indices->indexes[3] = indexes[3];
+
+  return NULL; 
+}
+
 void* buildQ2Index(void* args) {
   // Create indices for query 2.
   // Observation: usually there are many repeated dates, which means that
@@ -615,13 +655,17 @@ void CreateIndices(struct Database* db) {
   }
   db->indices = indices;
 
+  struct ThreadDataBuildIndex threadDataQ1 = {.db = db};
+  pthread_create(&threadDataQ1.tid, NULL, buildQ1Index, &threadDataQ1);
   struct ThreadDataBuildIndex threadDataQ2 = {.db = db};
   pthread_create(&threadDataQ2.tid, NULL, buildQ2Index, &threadDataQ2);
   struct ThreadDataBuildIndex threadDataQ3 = {.db = db};
   pthread_create(&threadDataQ3.tid, NULL, buildQ3Index, &threadDataQ3);
 
+  pthread_join(threadDataQ1.tid, NULL);
   pthread_join(threadDataQ2.tid, NULL);
   pthread_join(threadDataQ3.tid, NULL);
+  
 }
 
 void DestroyIndices(struct Database* db) {
