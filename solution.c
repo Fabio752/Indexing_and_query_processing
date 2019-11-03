@@ -12,6 +12,18 @@
 
 #define NUMBER_OF_THREADS 4  // We have 4 cores.
 
+struct CompressedItemTuple {
+  uint16_t salesDate;  // Max is 16384.
+  uint16_t employee;   // Max is 10752.
+  int price;
+};
+
+struct CompressedOrderTuple {
+  uint16_t salesDate;  // Max is 16384.
+  uint16_t employee;   // Max is 10752.
+  uint16_t employeeManagerID; // Max 1344.
+};
+
 struct RLEDate {
   uint16_t date;
   int prefixCount;
@@ -31,10 +43,11 @@ struct SalesDateEmployeeToCount {
 
 struct Indices {
   // Query 1.
-  struct ItemTuple** partitionedItems;
+  struct CompressedItemTuple** partitionedItems;
   size_t partitionedItemsSizes[NUMBER_OF_THREADS];
-  struct OrderTuple** partitionedOrders;
+  struct CompressedOrderTuple** partitionedOrders;
   size_t partitionedOrdersSizes[NUMBER_OF_THREADS];
+  size_t partitionedOrdersCardinality;
 
   // Query 2.
   struct RLEDate* RLEDates;
@@ -108,15 +121,15 @@ void* Q1BuildProbeOrders(void* args) {
   // Build the four hash tables.
   struct ThreadDataQ1* threadData = (struct ThreadDataQ1*)args;
   struct Indices* indices = threadData->db->indices;
-  struct ItemTuple* items = indices->partitionedItems[threadData->threadNumber];
+  struct CompressedItemTuple* items = indices->partitionedItems[threadData->threadNumber];
   size_t itemsCardinality =
       indices->partitionedItemsSizes[threadData->threadNumber];
-  struct OrderTuple* orders =
+  struct CompressedOrderTuple* orders =
       indices->partitionedOrders[threadData->threadNumber];
   size_t ordersCardinality =
       indices->partitionedOrdersSizes[threadData->threadNumber];
 
-  size_t ordersHashTableSize = ordersCardinality;
+  size_t ordersHashTableSize = indices->partitionedOrdersCardinality;
 
   // Build hash table on Orders.
   struct OrdersHashTableSlot* ordersHashTable =
@@ -134,17 +147,17 @@ void* Q1BuildProbeOrders(void* args) {
   // TODO iterate directly through pointers?
   for (size_t i = 0; i < ordersCardinality; i++) {
     // TODO Maybe faster to just copy?
-    struct OrderTuple* orderTuple = &orders[i];
+    struct CompressedOrderTuple* orderTuple = &orders[i];
     if (orderTuple->employeeManagerID != threadData->managerID) {
       continue;
     }
     locationsUsed++;
-    int hashValue = hashSlow(orderTuple->salesDate + orderTuple->employee,
+    int hashValue = hash(orderTuple->salesDate + orderTuple->employee,
                              ordersHashTableSize);
     while (ordersHashTable[hashValue].count >= 0 &&
            !(ordersHashTable[hashValue].salesDate == orderTuple->salesDate &&
              ordersHashTable[hashValue].employee == orderTuple->employee)) {
-      hashValue = nextSlotLinearSlow(hashValue, ordersHashTableSize);
+      hashValue = nextSlotLinear(hashValue, ordersHashTableSize);
     }
     if (ordersHashTable[hashValue].count < 0) {
       // Add new (salesDate, employee) pair.
@@ -164,16 +177,16 @@ void* Q1BuildProbeOrders(void* args) {
 
   // Probing.
   for (size_t i = 0; i < itemsCardinality; i++) {
-    struct ItemTuple* itemTuple = &items[i];
+    struct CompressedItemTuple* itemTuple = &items[i];
     if (itemTuple->price >= threadData->price) {
       continue;
     }
-    int hashValue = hashSlow(itemTuple->salesDate + itemTuple->employee,
+    int hashValue = hash(itemTuple->salesDate + itemTuple->employee,
                              ordersHashTableSize);
     while (ordersHashTable[hashValue].count >= 0 &&
            !(ordersHashTable[hashValue].salesDate == itemTuple->salesDate &&
              ordersHashTable[hashValue].employee == itemTuple->employee)) {
-      hashValue = nextSlotLinearSlow(hashValue, ordersHashTableSize);
+      hashValue = nextSlotLinear(hashValue, ordersHashTableSize);
     }
     if (ordersHashTable[hashValue].count >= 0) {
       result += ordersHashTable[hashValue].count;
@@ -516,18 +529,18 @@ void* buildQ1Index(void* args) {
   // TODO: try different size.
   size_t partitionedItemsCardinality = db->itemsCardinality / 2;
   size_t partitionedOrdersCardinality = db->ordersCardinality / 2;
-  struct ItemTuple** partitionedItems =
-      malloc(NUMBER_OF_THREADS * sizeof(struct ItemTuple*));
-  struct OrderTuple** partitionedOrders =
-      malloc(NUMBER_OF_THREADS * sizeof(struct OrderTuple*));
+  struct CompressedItemTuple** partitionedItems =
+      malloc(NUMBER_OF_THREADS * sizeof(struct CompressedItemTuple*));
+  struct CompressedOrderTuple** partitionedOrders =
+      malloc(NUMBER_OF_THREADS * sizeof(struct CompressedOrderTuple*));
   if (partitionedItems == NULL || partitionedOrders == NULL) {
     exit(1);
   }
   for (int i = 0; i < NUMBER_OF_THREADS; ++i) {
     partitionedItems[i] =
-        malloc(partitionedItemsCardinality * sizeof(struct ItemTuple));
+        malloc(partitionedItemsCardinality * sizeof(struct CompressedItemTuple));
     partitionedOrders[i] =
-        malloc(partitionedOrdersCardinality * sizeof(struct OrderTuple));
+        malloc(partitionedOrdersCardinality * sizeof(struct CompressedOrderTuple));
     if (partitionedItems[i] == NULL || partitionedOrders[i] == NULL) {
       exit(1);
     }
@@ -542,18 +555,27 @@ void* buildQ1Index(void* args) {
     int tableOffset =
         (db->items[i].salesDate + db->items[i].employee) & 3;  // % 4.
     partitionedItems[tableOffset][partitionedItemsSize[tableOffset]++] =
-        db->items[i];
+        (struct CompressedItemTuple) {
+          .salesDate = db->items[i].salesDate,
+          .employee = db->items[i].employee,
+          .price = db->items[i].price
+        };
   }
   for (size_t i = 0; i < db->ordersCardinality; ++i) {
     int tableOffset =
         (db->orders[i].salesDate + db->orders[i].employee) & 3;  // % 4.
     partitionedOrders[tableOffset][partitionedOrdersSize[tableOffset]++] =
-        db->orders[i];
+        (struct CompressedOrderTuple) {
+          .salesDate = db->orders[i].salesDate,
+          .employee = db->orders[i].employee,
+          .employeeManagerID = db->orders[i].employeeManagerID
+        };
   }
 
   struct Indices* indices = db->indices;
   indices->partitionedItems = partitionedItems;
   indices->partitionedOrders = partitionedOrders;
+  indices->partitionedOrdersCardinality = partitionedOrdersCardinality;
   for (int i = 0; i < NUMBER_OF_THREADS; i++) {
     indices->partitionedItemsSizes[i] = partitionedItemsSize[i];
     indices->partitionedOrdersSizes[i] = partitionedOrdersSize[i];
