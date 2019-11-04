@@ -28,6 +28,7 @@ struct SalesDateEmployeeToCount {
   int count;           // Negative count means empty slot.
   uint16_t salesDate;  // Max is 16384.
   uint16_t employee;   // Max is 10752.
+  uint16_t managerID;
 };
 
 struct Indices {
@@ -36,6 +37,7 @@ struct Indices {
 
   struct SalesDateEmployeeToCount* salesDateEmployeeToCountHT;
   size_t salesDateEmployeeToCountCardinality;
+  int* managerIDToCount;
 };
 
 struct ThreadDataQ1 {
@@ -345,60 +347,21 @@ void* Q3ProbeOrders(void* args) {
 }
 
 int Query3(struct Database* db, int countryID) {
-  // Build Stores hash table.
-  // The only hashed value is the employeeManagerID. If negative, the slot is
-  // empty.
-  size_t sizeStores = pow(2, ceil(log(db->storesCardinality) / log(2)) + 2);
-  int16_t* hashTableStores = malloc(sizeStores * sizeof(int16_t));
-  if (hashTableStores == NULL) {
-    exit(1);
-  }
-
-  // Initialize all slots to be empty.
-  memset(hashTableStores, -1, sizeStores * sizeof(int16_t));
-
-  // Populate Store hash table.
-  for (size_t i = 0; i < db->storesCardinality; ++i) {
-    struct StoreTuple* buildInput = &db->stores[i];
-    if (buildInput->countryID != countryID) {
-      continue;
-    }
-    int hashValue = hash(buildInput->managerID, sizeStores);
-    while (hashTableStores[hashValue] >= 0) {
-      hashValue = nextSlotLinear(hashValue, sizeStores);
-      // hashValue = nextSlotExpo(hashValue, sizeStores, backOff);
-      // hashValue = nextSlotRehashed(hashValue, sizeStores);
-    }
-    hashTableStores[hashValue] = buildInput->managerID;
-  }
-
-  // Parallelize probing using threads.
-  struct ThreadDataQ3 threadData[NUMBER_OF_THREADS];
-  // Split the ranges.
-  for (size_t i = 0; i < NUMBER_OF_THREADS; ++i) {
-    threadData[i] = (struct ThreadDataQ3){
-        .db = db,                            // Shared.
-        .hashTableStores = hashTableStores,  // Shared.
-        .sizeStores = sizeStores,
-        .start = i * db->ordersCardinality / NUMBER_OF_THREADS,
-        .end = (i + 1) * db->ordersCardinality / NUMBER_OF_THREADS};
-  }
-  threadData[NUMBER_OF_THREADS - 1].end =
-      db->ordersCardinality;  // Make sure we cover the entire range.
-
-  // Start threads.
-  for (int i = 0; i < NUMBER_OF_THREADS; ++i) {
-    pthread_create(&threadData[i].tid, NULL, Q3ProbeOrders, &threadData[i]);
-  }
+  struct Indices* indices = db->indices;
 
   int tuplesCount = 0;
-  // Join threads.
-  for (int i = 0; i < NUMBER_OF_THREADS; ++i) {
-    pthread_join(threadData[i].tid, NULL);
-    tuplesCount += threadData[i].result;
+  for(size_t i = 0; i < db->storesCardinality; i++){
+    struct StoreTuple* storeTuple = &db->stores[i];
+    if(storeTuple->countryID != countryID){
+      continue;
+    }
+    tuplesCount += indices->managerIDToCount[storeTuple->managerID];
   }
-
-  free(hashTableStores);
+  // Join threads.
+  // for (int i = 0; i < NUMBER_OF_THREADS; ++i) {
+  //   pthread_join(threadData[i].tid, NULL);
+  //   tuplesCount += threadData[i].result;
+  // }
 
   return tuplesCount;
 }
@@ -455,7 +418,7 @@ struct RLEDate* computeRLEDatesQSort(struct Database* db,
   if (orderedItemSalesDate == NULL) {
     exit(1);
   }
-  // Etract dates.
+  // Extract dates.
   for (size_t i = 0; i < db->itemsCardinality; ++i) {
     orderedItemSalesDate[i] = db->items[i].salesDate;
   }
@@ -534,79 +497,71 @@ void* buildQ2Index(void* args) {
 
 void* buildQ3Index(void* args) {
   // Q3 indices.
-  // Observations: we know that items.salesDate and items.employee are foreign
-  // keys into orders. We also don't care about price in Q3. Idea:
-  // 1) aggregate items, counting the number of different prices for each pair
-  //    salesDate and employee. This table will have cardinality <=
-  //    ordersCardinality.
-  // 2) join the aggregated items with orders. This table will have
-  //    cardinality <= ordersCardinality.
-  // 3) Use this in Q3.
-  // 4) Win the contest.
-  // (maybe you can do step 1 and 2 together)
-
-  // Create hash table from the pair (salesDate, employee) to count.
-  // Each pair (salesDate, employee) comes from Orders, and the count is
-  // initially set to zero.
+  
   struct ThreadDataBuildIndex* threadData = (struct ThreadDataBuildIndex*)args;
   struct Database* db = threadData->db;
+  
+  int* managerIDToCount = malloc((db->storesCardinality / 4) * sizeof(int));
+  memset(managerIDToCount, 0, (db->storesCardinality / 4) * sizeof(int));
 
-  // TODO: try different size.
-  size_t salesDateEmployeeToCountCardinality = db->ordersCardinality * 2;
+  size_t salesDateEmployeeToCountCardinality = db->ordersCardinality * 3;
   struct SalesDateEmployeeToCount* salesDateEmployeeToCountHT =
       malloc(salesDateEmployeeToCountCardinality *
              sizeof(struct SalesDateEmployeeToCount));
   if (salesDateEmployeeToCountHT == NULL) {
     exit(1);
   }
-  memset(salesDateEmployeeToCountHT, -1,
+  memset(salesDateEmployeeToCountHT, 0,
          salesDateEmployeeToCountCardinality *
              sizeof(struct SalesDateEmployeeToCount));
 
-  for (size_t i = 0; i < db->ordersCardinality; ++i) {
-    struct OrderTuple* orderTuple = &db->orders[i];
-    int hashValue = hash2(orderTuple->salesDate, orderTuple->employee,
+  for (size_t i = 0; i < db->itemsCardinality; ++i) {
+    struct ItemTuple* itemTuple = &db->items[i];
+    int hashValue = hash2(itemTuple->salesDate, itemTuple->employee,
                           salesDateEmployeeToCountCardinality);
-    while (salesDateEmployeeToCountHT[hashValue].count >= 0 &&
+    while (salesDateEmployeeToCountHT[hashValue].count > 0 &&
            !(salesDateEmployeeToCountHT[hashValue].salesDate ==
-                 orderTuple->salesDate &&
+                 itemTuple->salesDate &&
              salesDateEmployeeToCountHT[hashValue].employee ==
-                 orderTuple->employee)) {
+                 itemTuple->employee)) {
       // If we have already inserted the pair (salesDate, employee) in the
       // table, we don't need to add it again and the while terminates.
       // This guarantees the uniqueness in the keys of the table.
       hashValue =
           nextSlotLinear(hashValue, salesDateEmployeeToCountCardinality);
     }
-    if (salesDateEmployeeToCountHT[hashValue].count < 0) {
+    if (salesDateEmployeeToCountHT[hashValue].count == 0) {
       // Adding new pair (salesDate, employee).
-      salesDateEmployeeToCountHT[hashValue].count = 0;
-      salesDateEmployeeToCountHT[hashValue].salesDate = orderTuple->salesDate;
-      salesDateEmployeeToCountHT[hashValue].employee = orderTuple->employee;
+      salesDateEmployeeToCountHT[hashValue].salesDate = itemTuple->salesDate;
+      salesDateEmployeeToCountHT[hashValue].employee = itemTuple->employee;
     }
+    salesDateEmployeeToCountHT[hashValue].count++;
   }
-  // Iterate through items to count how many rows have a particular pair
+  // Iterate through orders to count how many rows have a particular pair
   // (salesDate, employee) that can be merged with orders.
-  for (size_t i = 0; i < db->itemsCardinality; ++i) {
-    struct ItemTuple* itemsTuple = &db->items[i];
-    int hashValue = hash2(itemsTuple->salesDate, itemsTuple->employee,
+  for (size_t i = 0; i < db->ordersCardinality; ++i) {
+    struct OrderTuple* orderTuple = &db->orders[i];
+    int hashValue = hash2(orderTuple->salesDate, orderTuple->employee,
                           salesDateEmployeeToCountCardinality);
-    while (salesDateEmployeeToCountHT[hashValue].count >= 0 &&
-           !(salesDateEmployeeToCountHT[hashValue].salesDate ==
-                 itemsTuple->salesDate &&
-             salesDateEmployeeToCountHT[hashValue].employee ==
-                 itemsTuple->employee)) {
+    while (salesDateEmployeeToCountHT[hashValue].count > 0) {
+      if (salesDateEmployeeToCountHT[hashValue].salesDate ==
+          orderTuple->salesDate &&
+          salesDateEmployeeToCountHT[hashValue].employee ==
+          orderTuple->employee) {
+        managerIDToCount[orderTuple->employeeManagerID] += 
+            salesDateEmployeeToCountHT[hashValue].count;
+        break;
+      }
       hashValue =
           nextSlotLinear(hashValue, salesDateEmployeeToCountCardinality);
     }
-    salesDateEmployeeToCountHT[hashValue].count +=
-        salesDateEmployeeToCountHT[hashValue].count >= 0;
   }
 
   struct Indices* indices = db->indices;
   indices->salesDateEmployeeToCountHT = salesDateEmployeeToCountHT;
   indices->salesDateEmployeeToCountCardinality =
       salesDateEmployeeToCountCardinality;
+  indices->managerIDToCount = managerIDToCount;
   return NULL;
 }
 
@@ -631,6 +586,7 @@ void DestroyIndices(struct Database* db) {
   struct Indices* indices = db->indices;
   free(indices->RLEDates);
   free(indices->salesDateEmployeeToCountHT);
+  free(indices->managerIDToCount);
   free(indices);
   db->indices = NULL;
 }
