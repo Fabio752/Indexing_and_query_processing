@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 
 #include "solution.h"
 
@@ -335,7 +336,7 @@ void* Q3ProbeOrders(void* args) {
               salesDateEmployeeToCountHT[hashValueSalesDateEmployee].count;
         }
       }
-      hashValueStores = nextSlotLinearSlow(hashValueStores, sizeStores);
+      hashValueStores = nextSlotLinear(hashValueStores, sizeStores);
     }
   }
   threadData->result = tuplesCount;
@@ -346,7 +347,7 @@ int Query3(struct Database* db, int countryID) {
   // Build Stores hash table.
   // The only hashed value is the employeeManagerID. If negative, the slot is
   // empty.
-  size_t sizeStores = db->storesCardinality * 2;
+  size_t sizeStores = pow(2, ceil(log(db->storesCardinality) / log(2)) + 1);
   int16_t* hashTableStores = malloc(sizeStores * sizeof(int16_t));
   if (hashTableStores == NULL) {
     exit(1);
@@ -363,7 +364,7 @@ int Query3(struct Database* db, int countryID) {
     }
     int hashValue = hash(buildInput->managerID, sizeStores);
     while (hashTableStores[hashValue] >= 0) {
-      hashValue = nextSlotLinearSlow(hashValue, sizeStores);
+      hashValue = nextSlotLinear(hashValue, sizeStores);
       // hashValue = nextSlotExpo(hashValue, sizeStores, backOff);
       // hashValue = nextSlotRehashed(hashValue, sizeStores);
     }
