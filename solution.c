@@ -1,10 +1,10 @@
+#include <math.h>
 #include <pthread.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <math.h>
 
 #include "solution.h"
 
@@ -234,7 +234,8 @@ void* Q2ProbeOrders(void* args) {
     // Do not reset the lower bound to zero since the location we are looking
     // for is surely bigger or equal to the current one.
     lb -= lb != 0;
-    ub = lb + date + 2 > RLEDatesCardinality ? RLEDatesCardinality : lb + date + 2;
+    ub = lb + date + 2 > RLEDatesCardinality ? RLEDatesCardinality
+                                             : lb + date + 2;
     while (lb < ub) {
       size_t mid = (lb + ub) >> 1;
       if (orderDate >= indices->RLEDates[mid].date) {
@@ -410,12 +411,12 @@ int compare(const void* a, const void* b) { return *(int*)a - *(int*)b; }
 // We cannot pass RLEDates as parameter as well because the compiler complains.
 struct RLEDate* computeRLEDatesCountingSort(struct Database* db, size_t maximum,
                                             size_t* RLEDatesCardinality) {
-  int* frequencyCount = malloc((maximum + 1) * sizeof(int));
+  uint16_t* frequencyCount = malloc((maximum + 1) * sizeof(uint16_t));
   if (frequencyCount == NULL) {
     exit(1);
   }
   // Initialize frequencies to zero.
-  memset(frequencyCount, 0, ((size_t)maximum + 1) * sizeof(int));
+  memset(frequencyCount, 0, ((size_t)maximum + 1) * sizeof(uint16_t));
 
   // Count frequencies, and how many different values are there.
   size_t different = 0;
