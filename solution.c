@@ -35,8 +35,6 @@ struct Indices {
   struct RLEDate* RLEDates;
   size_t RLEDatesCardinality;
 
-  struct SalesDateEmployeeToCount* salesDateEmployeeToCountHT;
-  size_t salesDateEmployeeToCountCardinality;
   int* managerIDToCount;
 };
 
@@ -307,7 +305,7 @@ void* Q3ProbeOrders(void* args) {
   // Count tuples.
   int tuplesCount = 0;
 
-  for (size_t i = threadData->start; i < threadData->end; ++i){
+  for (size_t i = threadData->start; i < threadData->end; ++i) {
     struct StoreTuple* storeTuple = &db->stores[i];
     if (storeTuple->countryID != threadData->countryID) {
       continue;
@@ -325,7 +323,7 @@ int Query3(struct Database* db, int countryID) {
   // Split the ranges.
   for (size_t i = 0; i < NUMBER_OF_THREADS; ++i) {
     threadData[i] = (struct ThreadDataQ3){
-        .db = db,                            // Shared.
+        .db = db,  // Shared.
         .start = i * db->storesCardinality / NUMBER_OF_THREADS,
         .end = (i + 1) * db->storesCardinality / NUMBER_OF_THREADS,
         .countryID = countryID};
@@ -478,10 +476,9 @@ void* buildQ2Index(void* args) {
 
 void* buildQ3Index(void* args) {
   // Q3 indices.
-  
   struct ThreadDataBuildIndex* threadData = (struct ThreadDataBuildIndex*)args;
   struct Database* db = threadData->db;
-  
+
   int* managerIDToCount = malloc((db->storesCardinality / 4) * sizeof(int));
   memset(managerIDToCount, 0, (db->storesCardinality / 4) * sizeof(int));
 
@@ -526,10 +523,10 @@ void* buildQ3Index(void* args) {
                           salesDateEmployeeToCountCardinality);
     while (salesDateEmployeeToCountHT[hashValue].count > 0) {
       if (salesDateEmployeeToCountHT[hashValue].salesDate ==
-          orderTuple->salesDate &&
+              orderTuple->salesDate &&
           salesDateEmployeeToCountHT[hashValue].employee ==
-          orderTuple->employee) {
-        managerIDToCount[orderTuple->employeeManagerID] += 
+              orderTuple->employee) {
+        managerIDToCount[orderTuple->employeeManagerID] +=
             salesDateEmployeeToCountHT[hashValue].count;
         break;
       }
@@ -538,10 +535,8 @@ void* buildQ3Index(void* args) {
     }
   }
 
+  free(salesDateEmployeeToCountHT);
   struct Indices* indices = db->indices;
-  indices->salesDateEmployeeToCountHT = salesDateEmployeeToCountHT;
-  indices->salesDateEmployeeToCountCardinality =
-      salesDateEmployeeToCountCardinality;
   indices->managerIDToCount = managerIDToCount;
   return NULL;
 }
@@ -566,7 +561,6 @@ void DestroyIndices(struct Database* db) {
   /// Free database indices
   struct Indices* indices = db->indices;
   free(indices->RLEDates);
-  free(indices->salesDateEmployeeToCountHT);
   free(indices->managerIDToCount);
   free(indices);
   db->indices = NULL;
