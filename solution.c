@@ -233,7 +233,7 @@ void* Q2ProbeOrders(void* args) {
     // Do not reset the lower bound to zero since the location we are looking
     // for is surely bigger or equal to the current one.
     lb -= lb != 0;
-    ub = RLEDatesCardinality;
+    ub = lb + date + 2 > RLEDatesCardinality ? RLEDatesCardinality : lb + date + 2;
     while (lb < ub) {
       size_t mid = (lb + ub) >> 1;
       if (orderDate >= indices->RLEDates[mid].date) {
