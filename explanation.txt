@@ -1,28 +1,35 @@
-Group members: Fabio Deo, Marco Selvatici. (Nutty Lens Personality)
-
+Group members: Fabio Deo, Marco Selvatici.
+Competition name: Nutty Lens Personality.
 Score in the competition: 383553 us
 
-INTRODUCTION
-There will be a brief section for each query, explaining how the idea works.
-Some queries may require the use of indices, and that will be pointed out during
-the explanation.
-
 QUERY 1
-This query basically implements an hash join.
-Since the conditions applied on both tables filter out many tuples both of orders
-and items, we measured that prebuilding hash tables or using foreign key joins actually
-does not improve performance. For this reason we do not use indices for this query.
+This query basically implements a hash join.
+Since the conditions applied to the tables filter out many tuples both for orders
+and items, we measured that prebuilding indices did not improve performance.
+For this reason we do not use indices for this query.
 
-Instead, we tried to partition both tables, and split the work through 4 threads.
-This resulted in a small speedup (code at commit aa208299f5f2d6ee9f0fe297790c6925d14feb82).
+One of the techniques we tried consisted in partitioning both tables when building
+indices, but doing so resulted in a small loss in performance (runnning the query on the
+raspberry pi gave a score of around 400000, versus the 367680 that we were getting
+without prebuilding indices).
+The code for that can be found in the branch 'partitioning2' (a similar partitioning
+approach is in the branch 'partitioning').
+
+We also tried to create an unclustered index, basically sorting the item table by price.
+This allowes to loookup only the relevant item tuples when executing the query.
+Nonetheless, building the index was so slow that the overall macrobenchmark execution
+time grew by a factor of four (even if we used RLE encoded prices, sorted with a
+counting sort).
+The code can be found in the branch q1_index_sort_prices.
 
 Actual code steps:
-1) build Orders hash table, using only the relevant elements.
+1) build Orders hash table, using only the relevant tuples.
 2) Split the range 0 -> itemsCardinality in several parts, based on the number
    of cores available.
 3) Run a thread per core, which iterates through a piece of the Items table and
    count the tuples that can be joined with orders (using the Orders hash table
    previously built).
+4) Join the threads and return the result.
 
 Complexity:
 - Build indices: N/A
@@ -33,16 +40,16 @@ Complexity:
 
 QUERY 2
 Our implementation of Q2 is based on the observation that usually the Items table
-contains many repeated dates, and that the date is basically the only information we
-care about.
-This means that Run-Length-Encoding the salesDate in Items enormously reduces the
+contains many repeated salesDate, and that the salesDate is the only information we
+care about in Items.
+This means that Run-Length-Encoding the salesDates in Items enormously reduces the
 size of the data structure we have too look-up, which translates into much, much faster
 lookups.
 Since we need to count how many tuples lie in ranges like:
 Items.salesDate <= Orders.salesDate <= Items.salesDate + x
 we compute the prefix sum of the Run-Length-Encoded salesDate, which allowes us to
-perform lookups in O(log(number_of_different_salesDates)) time (using a couple of
-binary searches).
+perform lookups in O(log(number_of_different_salesDates)) time, using a couple of
+binary searches.
 
 This set of changes gave a speedup of over 1000 times with respect to the initial
 naive nested loop join implementation.
@@ -50,11 +57,11 @@ naive nested loop join implementation.
 Actual code steps: (steps marked with a star happen when building indices)
 1*) Find out how distributed the Items.salesDate are.
 2*) Sort Items.salesDate:
-    2.1*) if the salesDate are close, use a custom implemented counting sort
+    2.1*) if the salesDate are clustered together, use a custom implemented counting sort
           (around 40 times faster than the stdlib qsort).
-    2.2*) if data distribution makes the use of counting sort impractical, fall
+    2.2*) if salesDate distribution makes the use of counting sort impractical, fall
           back to the stdlib qsort.
-3*) Run lenght encode the salesDate, and calculate the prefix sum (in the 
+3*) Run lenght encode the salesDates, and calculate the prefix sum (in the
     implementation steps 2 and 3 are merged together for performance).
 4) Split the range 0 -> ordersCardinality in several parts, based on the number
    of cores available.
@@ -76,10 +83,11 @@ Complexity:
 QUERY 3
 Our implementation of Q3 is based on one key observation: Items.salesDate and
 Items.employee are "foreing keys" of Orders.salesDate and Orders.employee.
-This means that we can precalculate a join when building the indices, and this
-join will have cardinality <= ordersCardinality (very important since usually
-itemsCardinality is way bigger).
-We also build a hash table for the stores, which tends to be pretty small.
+This means that we can precalculate a join between Items and Orders when building
+the indices, and this join will have cardinality <= ordersCardinality (very important
+since usually itemsCardinality is much bigger than ordersCardinality).
+We also build a hash table for the stores (which tends to be pretty small) and
+we use it to perform a final hash join.
 
 Actual code steps: (steps marked with a star happen when building indices)
 1*) Create an hash table with key (salesDate, employee) and value a count representing
@@ -104,6 +112,17 @@ Complexity:
   - space: O(storesCardinality)
 
 
+OTHER OPTIMIZATIONS
+In order to maximize performance, we also considered optimizations like:
+- use smaller datatypes when possible. By looking at the code in data_generator.h, you
+  can find out that some fields will never exceed the size of a 16 bit integer.
+  This improved both memory performance, while reducing the number of cache misses.
+- use bitwise and instead of the modulo operation when performing hashing or probing.
+  By making sure all of the sizes of your hash tables are powers of two, you can
+  substitute the modulo operation with a much less expensive bitwise and.
+  Since the hash and probing functions were heavily used, this provided a 5% speedup.
+
+
 EXTRA
 There are many parts of our solution that can qualify as extra:
 - The use of partitioned parallel probing of hash tables in all queries.
@@ -111,4 +130,4 @@ There are many parts of our solution that can qualify as extra:
   on the data distribution.
 - The use of an aggregation and foreign key join in Q3.
 - The very good performance for the labTS submission.
-
+- The final optimizations that allowed us to reduce our execution time under 400 ms.
