@@ -348,7 +348,7 @@ int Query3(struct Database* db, int countryID) {
   // Build Stores hash table.
   // The only hashed value is the employeeManagerID. If negative, the slot is
   // empty.
-  size_t sizeStores = pow(2, ceil(log(db->storesCardinality) / log(2)) + 1);
+  size_t sizeStores = pow(2, ceil(log(db->storesCardinality) / log(2)) + 2);
   int16_t* hashTableStores = malloc(sizeStores * sizeof(int16_t));
   if (hashTableStores == NULL) {
     exit(1);
