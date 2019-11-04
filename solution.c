@@ -99,11 +99,11 @@ void* Q1ProbeOrders(void* args) {
   // Count matching tuples.
   int result = 0;
   struct ThreadDataQ1 threadData = *((struct ThreadDataQ1*)args);
-  for (size_t i = threadData.start; i < threadData.end; ++i) {
-    if (threadData.db->items[i].price >= threadData.price) {
+  for (struct ItemTuple* itemTuple = threadData.db->items + threadData.start;
+       itemTuple != threadData.db->items + threadData.end; ++itemTuple) {
+    if (itemTuple->price >= threadData.price) {
       continue;
     }
-    struct ItemTuple* itemTuple = &threadData.db->items[i];
 
     int hashValue = hash(itemTuple->salesDate + itemTuple->employee,
                          threadData.ordersHashTableSize);
@@ -137,8 +137,8 @@ int Query1(struct Database* db, int managerID, int price) {
          ordersHashTableSize * sizeof(struct OrdersHashTableSlot));
 
   // Build orders hash table.
-  for (size_t i = 0; i < db->ordersCardinality; ++i) {
-    struct OrderTuple* orderTuple = &db->orders[i];
+  for (struct OrderTuple* orderTuple = db->orders;
+       orderTuple != db->orders + db->ordersCardinality; ++orderTuple) {
     if (orderTuple->employeeManagerID != managerID) {
       continue;
     }
@@ -203,11 +203,12 @@ void* Q2ProbeOrders(void* args) {
   int date = threadData->date;
 
   int tuplesCount = 0;
-  for (size_t i = threadData->start; i < threadData->end; ++i) {
-    if (db->orders[i].discount != discount) {
+  for (struct OrderTuple* orderTuple = db->orders + threadData->start;
+       orderTuple != db->orders + threadData->end; ++orderTuple) {
+    if (orderTuple->discount != discount) {
       continue;
     }
-    int orderDate = db->orders[i].salesDate;
+    int orderDate = orderTuple->salesDate;
     // Binary search the lower bound. Find the smallest date
     // >= orderDate - date.
     int target = orderDate - date;
@@ -233,7 +234,8 @@ void* Q2ProbeOrders(void* args) {
     // Do not reset the lower bound to zero since the location we are looking
     // for is surely bigger or equal to the current one.
     lb -= lb != 0;
-    ub = lb + date + 2 > RLEDatesCardinality ? RLEDatesCardinality : lb + date + 2;
+    ub = lb + date + 2 > RLEDatesCardinality ? RLEDatesCardinality
+                                             : lb + date + 2;
     while (lb < ub) {
       size_t mid = (lb + ub) >> 1;
       if (orderDate >= indices->RLEDates[mid].date) {
@@ -310,8 +312,8 @@ void* Q3ProbeOrders(void* args) {
   // Count tuples.
   int tuplesCount = 0;
 
-  for (size_t i = threadData->start; i < threadData->end; ++i) {
-    struct OrderTuple* orderTuple = &db->orders[i];
+  for (struct OrderTuple* orderTuple = db->orders + threadData->start;
+       orderTuple != db->orders + threadData->end; ++orderTuple) {
     int hashValueStores = hash(orderTuple->employeeManagerID, sizeStores);
     while (hashTableStores[hashValueStores] >= 0) {
       if (hashTableStores[hashValueStores] == orderTuple->employeeManagerID) {
@@ -356,8 +358,8 @@ int Query3(struct Database* db, int countryID) {
   memset(hashTableStores, -1, sizeStores * sizeof(int16_t));
 
   // Populate Store hash table.
-  for (size_t i = 0; i < db->storesCardinality; ++i) {
-    struct StoreTuple* buildInput = &db->stores[i];
+  for (struct StoreTuple* buildInput = db->stores;
+       buildInput != db->stores + db->storesCardinality; ++buildInput) {
     if (buildInput->countryID != countryID) {
       continue;
     }
@@ -561,8 +563,8 @@ void* buildQ3Index(void* args) {
          salesDateEmployeeToCountCardinality *
              sizeof(struct SalesDateEmployeeToCount));
 
-  for (size_t i = 0; i < db->ordersCardinality; ++i) {
-    struct OrderTuple* orderTuple = &db->orders[i];
+  for (struct OrderTuple* orderTuple = db->orders;
+       orderTuple != db->orders + db->ordersCardinality; ++orderTuple) {
     int hashValue = hash2(orderTuple->salesDate, orderTuple->employee,
                           salesDateEmployeeToCountCardinality);
     while (salesDateEmployeeToCountHT[hashValue].count >= 0 &&
@@ -585,8 +587,8 @@ void* buildQ3Index(void* args) {
   }
   // Iterate through items to count how many rows have a particular pair
   // (salesDate, employee) that can be merged with orders.
-  for (size_t i = 0; i < db->itemsCardinality; ++i) {
-    struct ItemTuple* itemsTuple = &db->items[i];
+  for (struct ItemTuple* itemsTuple = db->items;
+       itemsTuple != db->items + db->itemsCardinality; ++itemsTuple) {
     int hashValue = hash2(itemsTuple->salesDate, itemsTuple->employee,
                           salesDateEmployeeToCountCardinality);
     while (salesDateEmployeeToCountHT[hashValue].count >= 0 &&
