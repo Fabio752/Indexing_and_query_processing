@@ -1,10 +1,10 @@
+#include <math.h>
 #include <pthread.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <math.h>
 
 #include "solution.h"
 
@@ -12,7 +12,7 @@
 #include <time.h>
 
 #define NUMBER_OF_THREADS 4  // We have 4 cores.
-#define NUMBER_OF_BINS 4
+#define NUMBER_OF_BINS 8
 
 struct CompressedItem {
   uint16_t salesDate;
@@ -181,6 +181,28 @@ int Query1(struct Database* db, int managerID, int price) {
     }
 
     for (int i = 0; i <= lastBinIndex; ++i) {
+      pthread_join(threadData[i].tid, NULL);
+      tuplesCount += threadData[i].result;
+    }
+  } else {
+    // Assign multiple threads for each bin. We know that we will have max 2
+    // bins per thread.
+    struct ThreadDataQ1 threadData[NUMBER_OF_THREADS];
+    int curBin = 0;
+    int threadsWithExtraBin = (lastBinIndex % NUMBER_OF_THREADS) + 1;
+    for (int i = 0; i < NUMBER_OF_THREADS; i++) {
+      threadData[i] =
+          (struct ThreadDataQ1){.db = db,                            // Shared.
+                                .ordersHashTable = ordersHashTable,  // Shared.
+                                .ordersHashTableSize = ordersHashTableSize,
+                                .price = price,
+                                .startBin = curBin,
+                                .endBin = curBin + (i < threadsWithExtraBin)};
+      curBin += (i < threadsWithExtraBin) + 1;
+      pthread_create(&threadData[i].tid, NULL, Q1ProbeOrders, &threadData[i]);
+    }
+
+    for (int i = 0; i < NUMBER_OF_THREADS; ++i) {
       pthread_join(threadData[i].tid, NULL);
       tuplesCount += threadData[i].result;
     }
