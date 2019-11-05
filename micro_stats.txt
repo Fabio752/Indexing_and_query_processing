@@ -1,6 +1,15 @@
-Let's keep our results separate, since our machines are different.
+==== Benchmarks ====
 
-Benchmark results Marco
+Run on (4 X 3100 MHz CPU s)
+CPU Caches:
+  L1 Data 32K (x2)
+  L1 Instruction 32K (x2)
+  L2 Unified 256K (x2)
+  L3 Unified 4096K (x1)
+Load Average: 0.57, 0.99, 0.94
+***WARNING*** CPU scaling is enabled, the benchmark real time measurements may be noisy and will incur extra overhead.
+
+Microbenchmarks.
 CreateIndicesBenchmark/1024          52.0 us         31.1 us        22491
 CreateIndicesBenchmark/4096          56.5 us         27.5 us        23963
 CreateIndicesBenchmark/32768          254 us         44.2 us        10000
@@ -21,30 +30,27 @@ Query3Benchmark/4096                  521 us          421 us         1660
 Query3Benchmark/32768                 518 us          407 us         1708
 Query3Benchmark/262144               1026 us          482 us         1338
 
-Macro:
+Macrobenchmark.
 queryMix/2097152      46963 us         3716 us          100
 
 
-Benchmark results Fabio
-CreateIndicesBenchmark/1024          33.5 us         20.1 us        33753
-CreateIndicesBenchmark/4096          55.4 us         20.5 us        33645
-CreateIndicesBenchmark/32768         1067 us          126 us         5826
-CreateIndicesBenchmark/262144        4352 us         79.2 us         1000
-CreateIndicesBenchmark/1048576      15557 us         87.3 us         1000
-Query1Benchmark/1024                  432 us          356 us         2048
-Query1Benchmark/4096                  493 us          368 us         1779
-Query1Benchmark/32768                1129 us          449 us         1549
-Query1Benchmark/262144               5897 us         1563 us          447
-Query1Benchmark/1048576             21159 us         4277 us          164
-Query2Benchmark/1024                  412 us          342 us         1925
-Query2Benchmark/4096                  421 us          350 us         1775
-Query2Benchmark/32768                 438 us          353 us         1981
-Query2Benchmark/262144                557 us          359 us         1936
-Query2Benchmark/524288                705 us          355 us         1880
-Query3Benchmark/1024                  455 us          378 us         1813
-Query3Benchmark/4096                  451 us          376 us         1868
-Query3Benchmark/32768                 535 us          375 us         1639
-Query3Benchmark/262144               1474 us          438 us         1566
+==== Valgrind summary ====
 
-Macro:
-queryMix/2097152      74132 us         3847 us          100
+$ valgrind --leak-check=yes ./Debug/tests
+==10999== Memcheck, a memory error detector
+==10999== Copyright (C) 2002-2017, and GNU GPL'd, by Julian Seward et al.
+==10999== Using Valgrind-3.14.0 and LibVEX; rerun with -h for copyright info
+==10999== Command: ./Debug/tests
+==10999== 
+===============================================================================
+All tests passed (30 assertions in 3 test cases)
+
+==10999== 
+==10999== HEAP SUMMARY:
+==10999==     in use at exit: 0 bytes in 0 blocks
+==10999==   total heap usage: 2,918 allocs, 2,918 frees, 20,503,055 bytes allocated
+==10999== 
+==10999== All heap blocks were freed -- no leaks are possible
+==10999== 
+==10999== For counts of detected and suppressed errors, rerun with: -v
+==10999== ERROR SUMMARY: 0 errors from 0 contexts (suppressed: 0 from 0)

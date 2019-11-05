@@ -4,6 +4,8 @@
 Group members: Fabio Deo (fd5117), Marco Selvatici (ms8817).
 Competition name: Nutty Lens Personality.
 Score in the competition: 266401
+You can find the result of running micro and macro benchmark on our machines in the
+file micro_stats.txt.
 
 ## Query 1
 #### Explanation
