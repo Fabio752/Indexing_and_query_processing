@@ -3,14 +3,22 @@
 
 Group members: Fabio Deo, Marco Selvatici.
 Competition name: Nutty Lens Personality.
-Score in the competition: 270583
+Score in the competition: 266401
 
 ## Query 1
 #### Explanation
 This query basically implements a hash join.
 Since the conditions applied to the tables filter out many tuples both for orders
-and items, we measured that prebuilding indices did not improve performance.
-For this reason we do not use indices for this query.
+and items, we measured that prebuilding hash tables or precalculating joins did not
+improve performance.
+Instead, we create a clustered index on the items table, by splitting the tuples into
+eight bins, depending on their price attribute. The first bin contains the tuples
+with `price < maxPrice / 8`, the second bin contains the tuples with
+`maxPrice / 8 <= price < 2 * maxPrice / 8` and so on.
+When the query is executed, we only lookup the relevant bins trying to perform a
+hash join with orders. Furhermore, we parallelize these lookups using 4 threads.
+
+We also tried several other indices, but they never provided an increase in perfomance.
 
 One of the techniques we tried consisted in partitioning both tables inside
 `CreateIndices`, in order to work with each partition in a separate thread.
@@ -20,7 +28,7 @@ without this preprocessing).
 The code for that can be found in the branch `partitioning2` (a similar partitioning
 approach is in the branch `partitioning`).
 
-We also tried to create an unclustered index, basically sorting the item table by price.
+We also tried to create an unclustered index by sorting the item table by price.
 This allows to lookup only the relevant item tuples when executing the query (i.e. tuples
 where the price is smaller than the limit set).
 Nonetheless, building the index was so slow that the overall macrobenchmark execution
@@ -29,16 +37,18 @@ counting sort).
 The code can be found in the branch `q1_index_sort_prices`.
 
 #### Implementation
-1) build Orders hash table, using only the relevant tuples.
-2) Split the range `0 -> itemsCardinality` in `n` parts, based on the number
-   of cores available.
-3) Run `n` threads, each one iterating through a piece of the items table and
-   counting the tuples that can be joined with orders (using the orders hash table
-   built in step 1).
+Steps marked with an (I) happen when building indices.
+1) (I) Partition items in 8 bins.
+2) build Orders hash table, using only the relevant tuples.
+3) depending on how many bins we have to consider, start a certain number of threads.
+   Each thread iterates through one or multiple bins and counts the tuples that can be
+   joined with orders (using the hash table built in step 2).
 4) Join the threads and return the result.
 
 #### Complexity
-- Build indices: N/A
+- Build indices:
+  - time: O(itemsCardinality)
+  - space: O(itemsCardinality)
 - Execute query:
   - time: O(itemsCardinality + ordersCardinality)
   - space: O(ordersCardinality)
@@ -128,6 +138,7 @@ Steps marked with an (I) happen when building indices.
 
 ## Other optimizations
 In order to maximize performance, we also considered optimizations like:
+- We build all the indices in parallel.
 - Use smaller datatypes when possible. By looking at the code in data_generator.h, you
   can find out that some fields will never exceed the size of a 16 bit integer.
   This improved memory performance, while also reducing the number of cache misses.
