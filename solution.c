@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 
 #include "solution.h"
 
@@ -12,6 +13,13 @@
 #include <time.h>
 
 #define NUMBER_OF_THREADS 4  // We have 4 cores.
+#define NUMBER_OF_BINS 4
+
+struct CompressedItem {
+  uint16_t salesDate;
+  uint16_t employee;
+  int price;
+};
 
 struct RLEDate {
   uint16_t date;
@@ -32,19 +40,24 @@ struct SalesDateEmployeeToCount {
 };
 
 struct Indices {
+  struct CompressedItem** itemBins;
+  int* binSizes;
+
   struct RLEDate* RLEDates;
   size_t RLEDatesCardinality;
 
-  int* managerIDToCount;
+  struct SalesDateEmployeeToCount* salesDateEmployeeToCountHT;
+  size_t salesDateEmployeeToCountCardinality;
+  size_t sizeStores;
 };
 
 struct ThreadDataQ1 {
   struct Database* db;
   struct OrdersHashTableSlot* ordersHashTable;
   size_t ordersHashTableSize;
-  int price;
-  size_t start;
-  size_t end;
+  int price;  // -1 means all prices in the bins are safe.
+  size_t startBin;
+  size_t endBin;
   int result;
   pthread_t tid;
 };
@@ -82,47 +95,43 @@ int hash2(int value1, int value2, int size) {
 int nextSlotLinear(int currentSlot, int size) {
   return (currentSlot + 1) & (size - 1);
 }
-int nextSlotLinearSlow(int currentSlot, int size) {
-  return (currentSlot + 1) % size;
-}
-
-int nextSlotExpo(int currentSlot, int size, int backOff) {
-  return (currentSlot + backOff) & (size - 1);
-}
-
-int nextSlotRehashed(int currentSlot, int size, int root) {
-  if (currentSlot == 0) return root;
-  return (currentSlot * root) & (size - 1);
-}
 
 void* Q1ProbeOrders(void* args) {
   // Count matching tuples.
-  int result = 0;
   struct ThreadDataQ1 threadData = *((struct ThreadDataQ1*)args);
-  for (size_t i = threadData.start; i < threadData.end; ++i) {
-    if (threadData.db->items[i].price >= threadData.price) {
-      continue;
-    }
-    struct ItemTuple* itemTuple = &threadData.db->items[i];
+  struct Database* db = threadData.db;
+  struct Indices* indices = db->indices;
 
-    int hashValue = hash(itemTuple->salesDate + itemTuple->employee,
-                         threadData.ordersHashTableSize);
-    while (threadData.ordersHashTable[hashValue].count > 0 &&
-           !(threadData.ordersHashTable[hashValue].salesDate ==
-                 itemTuple->salesDate &&
-             threadData.ordersHashTable[hashValue].employee ==
-                 itemTuple->employee)) {
-      hashValue = nextSlotLinear(hashValue, threadData.ordersHashTableSize);
+  int result = 0;
+  for (size_t binIndex = threadData.startBin; binIndex <= threadData.endBin;
+       ++binIndex) {
+    struct CompressedItem* bin = indices->itemBins[binIndex];
+    int binSize = indices->binSizes[binIndex];
+
+    // Iterate through the bin.
+    for (int i = 0; i < binSize; ++i) {
+      if (threadData.price != -1 && bin[i].price >= threadData.price) {
+        continue;
+      }
+      struct CompressedItem* itemTuple = &bin[i];
+
+      int hashValue = hash(itemTuple->salesDate + itemTuple->employee,
+                           threadData.ordersHashTableSize);
+      while (threadData.ordersHashTable[hashValue].count > 0 &&
+             !(threadData.ordersHashTable[hashValue].salesDate ==
+                   itemTuple->salesDate &&
+               threadData.ordersHashTable[hashValue].employee ==
+                   itemTuple->employee)) {
+        hashValue = nextSlotLinear(hashValue, threadData.ordersHashTableSize);
+      }
+      result += threadData.ordersHashTable[hashValue].count;
     }
-    result += threadData.ordersHashTable[hashValue].count;
   }
   ((struct ThreadDataQ1*)args)->result = result;
   return NULL;
 }
 
 int Query1(struct Database* db, int managerID, int price) {
-  // TODO: use some indexing to speed this up. E.g. maybe sort items by price?
-  // E.g. maybe prebuild ordersHashTableSize?
   size_t ordersHashTableSize = db->ordersCardinality;
   struct OrdersHashTableSlot* ordersHashTable =
       calloc(ordersHashTableSize, sizeof(struct OrdersHashTableSlot));
@@ -151,31 +160,31 @@ int Query1(struct Database* db, int managerID, int price) {
     ++ordersHashTable[hashValue].count;
   }
 
-  // Parallelize probing using threads.
-  struct ThreadDataQ1 threadData[NUMBER_OF_THREADS];
-  // Split the ranges.
-  for (size_t i = 0; i < NUMBER_OF_THREADS; ++i) {
-    threadData[i] = (struct ThreadDataQ1){
-        .db = db,                            // Shared.
-        .ordersHashTable = ordersHashTable,  // Shared.
-        .ordersHashTableSize = ordersHashTableSize,
-        .price = price,
-        .start = i * db->itemsCardinality / NUMBER_OF_THREADS,
-        .end = (i + 1) * db->itemsCardinality / NUMBER_OF_THREADS};
-  }
-  threadData[NUMBER_OF_THREADS - 1].end =
-      db->itemsCardinality;  // Make sure we cover the entire range.
-
-  // Start threads.
-  for (int i = 0; i < NUMBER_OF_THREADS; ++i) {
-    pthread_create(&threadData[i].tid, NULL, Q1ProbeOrders, &threadData[i]);
-  }
+  // Find out how many bins are relevant.
+  int lastBinIndex = price / ((db->itemsCardinality / 2) / (NUMBER_OF_BINS));
 
   int tuplesCount = 0;
-  // Join threads.
-  for (int i = 0; i < NUMBER_OF_THREADS; ++i) {
-    pthread_join(threadData[i].tid, NULL);
-    tuplesCount += threadData[i].result;
+
+  if (lastBinIndex < NUMBER_OF_THREADS) {
+    // If we have got 4 or less bins to explore, use one thread for each.
+    struct ThreadDataQ1 threadData[lastBinIndex + 1];
+    for (int i = 0; i <= lastBinIndex; i++) {
+      threadData[i] = (struct ThreadDataQ1){
+          .db = db,                            // Shared.
+          .ordersHashTable = ordersHashTable,  // Shared.
+          .ordersHashTableSize = ordersHashTableSize,
+          .price = (i == lastBinIndex)
+                       ? price
+                       : -1,  // Only last bin has to check for price.
+          .startBin = i,
+          .endBin = i};
+      pthread_create(&threadData[i].tid, NULL, Q1ProbeOrders, &threadData[i]);
+    }
+
+    for (int i = 0; i <= lastBinIndex; ++i) {
+      pthread_join(threadData[i].tid, NULL);
+      tuplesCount += threadData[i].result;
+    }
   }
 
   free(ordersHashTable);
@@ -295,9 +304,31 @@ void* Q3ProbeOrders(void* args) {
   int tuplesCount = 0;
 
   for (size_t i = threadData->start; i < threadData->end; ++i) {
-    struct StoreTuple* storeTuple = &db->stores[i];
-    if (storeTuple->countryID != threadData->countryID) {
-      continue;
+    struct OrderTuple* orderTuple = &db->orders[i];
+    int hashValueStores = hash(orderTuple->employeeManagerID, sizeStores);
+    while (hashTableStores[hashValueStores] >= 0) {
+      if (hashTableStores[hashValueStores] == orderTuple->employeeManagerID) {
+        // Lookup how many items matched this pair (salesDate, employee).
+        int hashValueSalesDateEmployee =
+            hash2(orderTuple->salesDate, orderTuple->employee,
+                  salesDateEmployeeToCountCardinality);
+        // TODO: change these condition to have == instead of !=. Usually ==
+        // evaluates to false earlier.
+        while (
+            salesDateEmployeeToCountHT[hashValueSalesDateEmployee].count >= 0 &&
+            !(salesDateEmployeeToCountHT[hashValueSalesDateEmployee]
+                      .salesDate == orderTuple->salesDate &&
+              salesDateEmployeeToCountHT[hashValueSalesDateEmployee].employee ==
+                  orderTuple->employee)) {
+          hashValueSalesDateEmployee = nextSlotLinear(
+              hashValueSalesDateEmployee, salesDateEmployeeToCountCardinality);
+        }
+        if (salesDateEmployeeToCountHT[hashValueSalesDateEmployee].count >= 0) {
+          tuplesCount +=
+              salesDateEmployeeToCountHT[hashValueSalesDateEmployee].count;
+        }
+      }
+      hashValueStores = nextSlotLinear(hashValueStores, sizeStores);
     }
     tuplesCount += indices->managerIDToCount[storeTuple->managerID];
   }
@@ -307,6 +338,34 @@ void* Q3ProbeOrders(void* args) {
 }
 
 int Query3(struct Database* db, int countryID) {
+  // Build Stores hash table.
+  // The only hashed value is the employeeManagerID. If negative, the slot is
+  // empty.
+  struct Indices* indices = db->indices;
+  size_t sizeStores = indices->sizeStores;
+  int16_t* hashTableStores = malloc(sizeStores * sizeof(int16_t));
+  if (hashTableStores == NULL) {
+    exit(1);
+  }
+
+  // Initialize all slots to be empty.
+  memset(hashTableStores, -1, sizeStores * sizeof(int16_t));
+
+  // Populate Store hash table.
+  for (size_t i = 0; i < db->storesCardinality; ++i) {
+    struct StoreTuple* buildInput = &db->stores[i];
+    if (buildInput->countryID != countryID) {
+      continue;
+    }
+    int hashValue = hash(buildInput->managerID, sizeStores);
+    while (hashTableStores[hashValue] >= 0) {
+      hashValue = nextSlotLinear(hashValue, sizeStores);
+      // hashValue = nextSlotExpo(hashValue, sizeStores, backOff);
+      // hashValue = nextSlotRehashed(hashValue, sizeStores);
+    }
+    hashTableStores[hashValue] = buildInput->managerID;
+  }
+
   // Parallelize probing using threads.
   struct ThreadDataQ3 threadData[NUMBER_OF_THREADS];
   // Split the ranges.
@@ -342,7 +401,7 @@ int compare(const void* a, const void* b) { return *(int*)a - *(int*)b; }
 // We cannot pass RLEDates as parameter as well because the compiler complains.
 struct RLEDate* computeRLEDatesCountingSort(struct Database* db, size_t maximum,
                                             size_t* RLEDatesCardinality) {
-  uint16_t* frequencyCount = calloc(maximum + 1, sizeof(uint16_t));
+  int* frequencyCount = calloc((maximum + 1), sizeof(int));
   if (frequencyCount == NULL) {
     exit(1);
   }
@@ -422,6 +481,44 @@ struct RLEDate* computeRLEDatesQSort(struct Database* db,
   return RLEDates;
 }
 
+void* buildQ1Index(void* args) {
+  struct ThreadDataBuildIndex* threadData = (struct ThreadDataBuildIndex*)args;
+  struct Database* db = threadData->db;
+
+  int pricesRange = db->itemsCardinality / 2;
+  // TODO: Can reduce this, having 8 bins we are overallocating by two.
+  size_t binMaxSize = (db->itemsCardinality / NUMBER_OF_BINS) * 2;
+  int binRange = pricesRange / NUMBER_OF_BINS;
+
+  struct CompressedItem** itemBins =
+      malloc(NUMBER_OF_BINS * sizeof(struct CompressedItem*));
+  int* binSizes = calloc(NUMBER_OF_BINS, sizeof(int));
+  if (itemBins == NULL || binSizes == NULL) {
+    exit(1);
+  }
+  for (int i = 0; i < NUMBER_OF_BINS; i++) {
+    itemBins[i] = malloc(binMaxSize * sizeof(struct CompressedItem));
+    if (itemBins[i] == NULL) {
+      exit(1);
+    }
+  }
+
+  // Copy items in corresponding bins.
+  for (size_t i = 0; i < db->itemsCardinality; ++i) {
+    int binIndex = db->items[i].price / binRange;
+    itemBins[binIndex][binSizes[binIndex]++] =
+        (struct CompressedItem){.salesDate = db->items[i].salesDate,
+                                .employee = db->items[i].employee,
+                                .price = db->items[i].price};
+  }
+
+  struct Indices* indices = db->indices;
+  indices->itemBins = itemBins;
+  indices->binSizes = binSizes;
+
+  return NULL;
+}
+
 void* buildQ2Index(void* args) {
   // Create indices for query 2.
   // Observation: usually there are many repeated dates, which means that
@@ -462,13 +559,12 @@ void* buildQ2Index(void* args) {
 }
 
 void* buildQ3Index(void* args) {
-  // Q3 indices.
   struct ThreadDataBuildIndex* threadData = (struct ThreadDataBuildIndex*)args;
   struct Database* db = threadData->db;
 
-  int* managerIDToCount = calloc((db->storesCardinality / 4), sizeof(int));
-
-  size_t salesDateEmployeeToCountCardinality = db->ordersCardinality * 2;
+  // TODO: try different size.
+  int itemsCardinality = (int)db->itemsCardinality;
+  int salesDateEmployeeToCountCardinality = db->ordersCardinality * 2;
   struct SalesDateEmployeeToCount* salesDateEmployeeToCountHT =
       calloc(salesDateEmployeeToCountCardinality,
              sizeof(struct SalesDateEmployeeToCount));
@@ -476,7 +572,7 @@ void* buildQ3Index(void* args) {
     exit(1);
   }
 
-  for (size_t i = 0; i < db->itemsCardinality; ++i) {
+  for (int i = 0; i < itemsCardinality; ++i) {
     struct ItemTuple* itemTuple = &db->items[i];
     int hashValue = hash2(itemTuple->salesDate, itemTuple->employee,
                           salesDateEmployeeToCountCardinality);
@@ -498,25 +594,6 @@ void* buildQ3Index(void* args) {
     }
     salesDateEmployeeToCountHT[hashValue].count++;
   }
-  // Iterate through orders to count how many rows have a particular pair
-  // (salesDate, employee) that can be merged with orders.
-  for (size_t i = 0; i < db->ordersCardinality; ++i) {
-    struct OrderTuple* orderTuple = &db->orders[i];
-    int hashValue = hash2(orderTuple->salesDate, orderTuple->employee,
-                          salesDateEmployeeToCountCardinality);
-    while (salesDateEmployeeToCountHT[hashValue].count > 0) {
-      if (salesDateEmployeeToCountHT[hashValue].salesDate ==
-              orderTuple->salesDate &&
-          salesDateEmployeeToCountHT[hashValue].employee ==
-              orderTuple->employee) {
-        managerIDToCount[orderTuple->employeeManagerID] +=
-            salesDateEmployeeToCountHT[hashValue].count;
-        break;
-      }
-      hashValue =
-          nextSlotLinear(hashValue, salesDateEmployeeToCountCardinality);
-    }
-  }
 
   free(salesDateEmployeeToCountHT);
   struct Indices* indices = db->indices;
@@ -531,11 +608,16 @@ void CreateIndices(struct Database* db) {
   }
   db->indices = indices;
 
-  struct ThreadDataBuildIndex threadDataQ2 = {.db = db};
-  pthread_create(&threadDataQ2.tid, NULL, buildQ2Index, &threadDataQ2);
   struct ThreadDataBuildIndex threadDataQ3 = {.db = db};
   pthread_create(&threadDataQ3.tid, NULL, buildQ3Index, &threadDataQ3);
+  struct ThreadDataBuildIndex threadDataQ2 = {.db = db};
+  pthread_create(&threadDataQ2.tid, NULL, buildQ2Index, &threadDataQ2);
+  struct ThreadDataBuildIndex threadDataQ1 = {.db = db};
+  pthread_create(&threadDataQ1.tid, NULL, buildQ1Index, &threadDataQ1);
 
+  indices->sizeStores = pow(2, ceil(log(db->storesCardinality) / log(2)) + 2);
+
+  pthread_join(threadDataQ1.tid, NULL);
   pthread_join(threadDataQ2.tid, NULL);
   pthread_join(threadDataQ3.tid, NULL);
 }
@@ -543,6 +625,11 @@ void CreateIndices(struct Database* db) {
 void DestroyIndices(struct Database* db) {
   /// Free database indices
   struct Indices* indices = db->indices;
+  for (int i = 0; i < NUMBER_OF_BINS; ++i) {
+    free(indices->itemBins[i]);
+  }
+  free(indices->itemBins);
+  free(indices->binSizes);
   free(indices->RLEDates);
   free(indices->managerIDToCount);
   free(indices);
