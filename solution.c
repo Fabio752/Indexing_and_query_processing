@@ -107,16 +107,14 @@ void* Q1ProbeOrders(void* args) {
 
     int hashValue = hash(itemTuple->salesDate + itemTuple->employee,
                          threadData.ordersHashTableSize);
-    while (threadData.ordersHashTable[hashValue].count >= 0 &&
+    while (threadData.ordersHashTable[hashValue].count > 0 &&
            !(threadData.ordersHashTable[hashValue].salesDate ==
                  itemTuple->salesDate &&
              threadData.ordersHashTable[hashValue].employee ==
                  itemTuple->employee)) {
       hashValue = nextSlotLinear(hashValue, threadData.ordersHashTableSize);
     }
-    if (threadData.ordersHashTable[hashValue].count >= 0) {
-      result += threadData.ordersHashTable[hashValue].count;
-    }
+    result += threadData.ordersHashTable[hashValue].count;
   }
   ((struct ThreadDataQ1*)args)->result = result;
   return NULL;
@@ -127,14 +125,10 @@ int Query1(struct Database* db, int managerID, int price) {
   // E.g. maybe prebuild ordersHashTableSize?
   size_t ordersHashTableSize = db->ordersCardinality;
   struct OrdersHashTableSlot* ordersHashTable =
-      malloc(ordersHashTableSize * sizeof(struct OrdersHashTableSlot));
+      calloc(ordersHashTableSize, sizeof(struct OrdersHashTableSlot));
   if (ordersHashTable == NULL) {
     exit(1);
   }
-
-  // Initialize all slots to be empty.
-  memset(ordersHashTable, -1,
-         ordersHashTableSize * sizeof(struct OrdersHashTableSlot));
 
   // Build orders hash table.
   for (size_t i = 0; i < db->ordersCardinality; ++i) {
@@ -144,22 +138,17 @@ int Query1(struct Database* db, int managerID, int price) {
     }
     int hashValue =
         hash(orderTuple->salesDate + orderTuple->employee, ordersHashTableSize);
-    while (ordersHashTable[hashValue].count >= 0 &&
+    while (ordersHashTable[hashValue].count > 0 &&
            !(ordersHashTable[hashValue].salesDate == orderTuple->salesDate &&
              ordersHashTable[hashValue].employee == orderTuple->employee)) {
       hashValue = nextSlotLinear(hashValue, ordersHashTableSize);
     }
-    if (ordersHashTable[hashValue].count < 0) {
+    if (ordersHashTable[hashValue].count == 0) {
       // Add new (salesDate, employee) pair.
-      ordersHashTable[hashValue].count = 1;
       ordersHashTable[hashValue].salesDate = orderTuple->salesDate;
       ordersHashTable[hashValue].employee = orderTuple->employee;
-    } else {
-      // We already have inserted the pair (salesDate, employee) in the
-      // table, so we don't need to add it again. This also guarantees the
-      // uniqueness in the keys of the table.
-      ++ordersHashTable[hashValue].count;
     }
+    ++ordersHashTable[hashValue].count;
   }
 
   // Parallelize probing using threads.
@@ -353,12 +342,10 @@ int compare(const void* a, const void* b) { return *(int*)a - *(int*)b; }
 // We cannot pass RLEDates as parameter as well because the compiler complains.
 struct RLEDate* computeRLEDatesCountingSort(struct Database* db, size_t maximum,
                                             size_t* RLEDatesCardinality) {
-  uint16_t* frequencyCount = malloc((maximum + 1) * sizeof(uint16_t));
+  uint16_t* frequencyCount = calloc(maximum + 1, sizeof(uint16_t));
   if (frequencyCount == NULL) {
     exit(1);
   }
-  // Initialize frequencies to zero.
-  memset(frequencyCount, 0, ((size_t)maximum + 1) * sizeof(uint16_t));
 
   // Count frequencies, and how many different values are there.
   size_t different = 0;
@@ -479,19 +466,15 @@ void* buildQ3Index(void* args) {
   struct ThreadDataBuildIndex* threadData = (struct ThreadDataBuildIndex*)args;
   struct Database* db = threadData->db;
 
-  int* managerIDToCount = malloc((db->storesCardinality / 4) * sizeof(int));
-  memset(managerIDToCount, 0, (db->storesCardinality / 4) * sizeof(int));
+  int* managerIDToCount = calloc((db->storesCardinality / 4), sizeof(int));
 
   size_t salesDateEmployeeToCountCardinality = db->ordersCardinality * 2;
   struct SalesDateEmployeeToCount* salesDateEmployeeToCountHT =
-      malloc(salesDateEmployeeToCountCardinality *
+      calloc(salesDateEmployeeToCountCardinality,
              sizeof(struct SalesDateEmployeeToCount));
   if (salesDateEmployeeToCountHT == NULL) {
     exit(1);
   }
-  memset(salesDateEmployeeToCountHT, 0,
-         salesDateEmployeeToCountCardinality *
-             sizeof(struct SalesDateEmployeeToCount));
 
   for (size_t i = 0; i < db->itemsCardinality; ++i) {
     struct ItemTuple* itemTuple = &db->items[i];
