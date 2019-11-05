@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 
 #include "solution.h"
 
@@ -45,6 +46,7 @@ struct Indices {
 
   struct SalesDateEmployeeToCount* salesDateEmployeeToCountHT;
   size_t salesDateEmployeeToCountCardinality;
+  size_t sizeStores;
 };
 
 struct ThreadDataQ1 {
@@ -91,18 +93,6 @@ int hash2(int value1, int value2, int size) {
 
 int nextSlotLinear(int currentSlot, int size) {
   return (currentSlot + 1) & (size - 1);
-}
-int nextSlotLinearSlow(int currentSlot, int size) {
-  return (currentSlot + 1) % size;
-}
-
-int nextSlotExpo(int currentSlot, int size, int backOff) {
-  return (currentSlot + backOff) & (size - 1);
-}
-
-int nextSlotRehashed(int currentSlot, int size, int root) {
-  if (currentSlot == 0) return root;
-  return (currentSlot * root) & (size - 1);
 }
 
 void* Q1ProbeOrders(void* args) {
@@ -343,7 +333,7 @@ void* Q3ProbeOrders(void* args) {
               salesDateEmployeeToCountHT[hashValueSalesDateEmployee].count;
         }
       }
-      hashValueStores = nextSlotLinearSlow(hashValueStores, sizeStores);
+      hashValueStores = nextSlotLinear(hashValueStores, sizeStores);
     }
   }
   threadData->result = tuplesCount;
@@ -354,7 +344,8 @@ int Query3(struct Database* db, int countryID) {
   // Build Stores hash table.
   // The only hashed value is the employeeManagerID. If negative, the slot is
   // empty.
-  size_t sizeStores = db->storesCardinality * 2;
+  struct Indices* indices = db->indices;
+  size_t sizeStores = indices->sizeStores;
   int16_t* hashTableStores = malloc(sizeStores * sizeof(int16_t));
   if (hashTableStores == NULL) {
     exit(1);
@@ -371,7 +362,7 @@ int Query3(struct Database* db, int countryID) {
     }
     int hashValue = hash(buildInput->managerID, sizeStores);
     while (hashTableStores[hashValue] >= 0) {
-      hashValue = nextSlotLinearSlow(hashValue, sizeStores);
+      hashValue = nextSlotLinear(hashValue, sizeStores);
       // hashValue = nextSlotExpo(hashValue, sizeStores, backOff);
       // hashValue = nextSlotRehashed(hashValue, sizeStores);
     }
@@ -631,6 +622,8 @@ void CreateIndices(struct Database* db) {
   pthread_create(&threadDataQ2.tid, NULL, buildQ2Index, &threadDataQ2);
   struct ThreadDataBuildIndex threadDataQ1 = {.db = db};
   pthread_create(&threadDataQ1.tid, NULL, buildQ1Index, &threadDataQ1);
+
+  indices->sizeStores = pow(2, ceil(log(db->storesCardinality) / log(2)) + 2);
 
   pthread_join(threadDataQ1.tid, NULL);
   pthread_join(threadDataQ2.tid, NULL);
