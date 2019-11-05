@@ -1,4 +1,3 @@
-#include <math.h>
 #include <pthread.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -36,7 +35,6 @@ struct SalesDateEmployeeToCount {
   int count;           // Negative count means empty slot.
   uint16_t salesDate;  // Max is 16384.
   uint16_t employee;   // Max is 10752.
-  uint16_t managerID;
 };
 
 struct Indices {
@@ -74,9 +72,10 @@ struct ThreadDataQ2 {
 
 struct ThreadDataQ3 {
   struct Database* db;
+  int16_t* hashTableStores;  // Contains employeeManagerID, with max 1344.
+  size_t sizeStores;
   size_t start;
   size_t end;
-  int countryID;
   int result;
   pthread_t tid;
 };
@@ -299,6 +298,12 @@ void* Q3ProbeOrders(void* args) {
   struct ThreadDataQ3* threadData = (struct ThreadDataQ3*)args;
   struct Database* db = threadData->db;
   struct Indices* indices = db->indices;
+  struct SalesDateEmployeeToCount* salesDateEmployeeToCountHT =
+      indices->salesDateEmployeeToCountHT;
+  size_t salesDateEmployeeToCountCardinality =
+      indices->salesDateEmployeeToCountCardinality;
+  int16_t* hashTableStores = threadData->hashTableStores;
+  size_t sizeStores = threadData->sizeStores;
 
   // Count tuples.
   int tuplesCount = 0;
@@ -330,9 +335,7 @@ void* Q3ProbeOrders(void* args) {
       }
       hashValueStores = nextSlotLinear(hashValueStores, sizeStores);
     }
-    tuplesCount += indices->managerIDToCount[storeTuple->managerID];
   }
-
   threadData->result = tuplesCount;
   return NULL;
 }
@@ -371,24 +374,28 @@ int Query3(struct Database* db, int countryID) {
   // Split the ranges.
   for (size_t i = 0; i < NUMBER_OF_THREADS; ++i) {
     threadData[i] = (struct ThreadDataQ3){
-        .db = db,  // Shared.
-        .start = i * db->storesCardinality / NUMBER_OF_THREADS,
-        .end = (i + 1) * db->storesCardinality / NUMBER_OF_THREADS,
-        .countryID = countryID};
+        .db = db,                            // Shared.
+        .hashTableStores = hashTableStores,  // Shared.
+        .sizeStores = sizeStores,
+        .start = i * db->ordersCardinality / NUMBER_OF_THREADS,
+        .end = (i + 1) * db->ordersCardinality / NUMBER_OF_THREADS};
   }
   threadData[NUMBER_OF_THREADS - 1].end =
-      db->storesCardinality;  // Make sure we cover the entire range.
+      db->ordersCardinality;  // Make sure we cover the entire range.
 
   // Start threads.
-  int tuplesCount = 0;
   for (int i = 0; i < NUMBER_OF_THREADS; ++i) {
     pthread_create(&threadData[i].tid, NULL, Q3ProbeOrders, &threadData[i]);
   }
 
+  int tuplesCount = 0;
+  // Join threads.
   for (int i = 0; i < NUMBER_OF_THREADS; ++i) {
     pthread_join(threadData[i].tid, NULL);
     tuplesCount += threadData[i].result;
   }
+
+  free(hashTableStores);
 
   return tuplesCount;
 }
@@ -443,7 +450,7 @@ struct RLEDate* computeRLEDatesQSort(struct Database* db,
   if (orderedItemSalesDate == NULL) {
     exit(1);
   }
-  // Extract dates.
+  // Etract dates.
   for (size_t i = 0; i < db->itemsCardinality; ++i) {
     orderedItemSalesDate[i] = db->items[i].salesDate;
   }
@@ -595,9 +602,10 @@ void* buildQ3Index(void* args) {
     salesDateEmployeeToCountHT[hashValue].count++;
   }
 
-  free(salesDateEmployeeToCountHT);
   struct Indices* indices = db->indices;
-  indices->managerIDToCount = managerIDToCount;
+  indices->salesDateEmployeeToCountHT = salesDateEmployeeToCountHT;
+  indices->salesDateEmployeeToCountCardinality =
+      salesDateEmployeeToCountCardinality;
   return NULL;
 }
 
@@ -631,7 +639,7 @@ void DestroyIndices(struct Database* db) {
   free(indices->itemBins);
   free(indices->binSizes);
   free(indices->RLEDates);
-  free(indices->managerIDToCount);
+  free(indices->salesDateEmployeeToCountHT);
   free(indices);
   db->indices = NULL;
 }
