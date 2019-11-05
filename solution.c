@@ -531,74 +531,43 @@ void* buildQ2Index(void* args) {
 }
 
 void* buildQ3Index(void* args) {
-  // Q3 indices.
-  // Observations: we know that items.salesDate and items.employee are foreign
-  // keys into orders. We also don't care about price in Q3. Idea:
-  // 1) aggregate items, counting the number of different prices for each pair
-  //    salesDate and employee. This table will have cardinality <=
-  //    ordersCardinality.
-  // 2) join the aggregated items with orders. This table will have
-  //    cardinality <= ordersCardinality.
-  // 3) Use this in Q3.
-  // 4) Win the contest.
-  // (maybe you can do step 1 and 2 together)
-
-  // Create hash table from the pair (salesDate, employee) to count.
-  // Each pair (salesDate, employee) comes from Orders, and the count is
-  // initially set to zero.
   struct ThreadDataBuildIndex* threadData = (struct ThreadDataBuildIndex*)args;
   struct Database* db = threadData->db;
 
   // TODO: try different size.
-  size_t salesDateEmployeeToCountCardinality = db->ordersCardinality * 2;
+  int itemsCardinality = (int)db->itemsCardinality;
+  int salesDateEmployeeToCountCardinality = db->ordersCardinality * 2;
   struct SalesDateEmployeeToCount* salesDateEmployeeToCountHT =
       malloc(salesDateEmployeeToCountCardinality *
              sizeof(struct SalesDateEmployeeToCount));
   if (salesDateEmployeeToCountHT == NULL) {
     exit(1);
   }
-  memset(salesDateEmployeeToCountHT, -1,
+  memset(salesDateEmployeeToCountHT, 0,
          salesDateEmployeeToCountCardinality *
              sizeof(struct SalesDateEmployeeToCount));
 
-  for (size_t i = 0; i < db->ordersCardinality; ++i) {
-    struct OrderTuple* orderTuple = &db->orders[i];
-    int hashValue = hash2(orderTuple->salesDate, orderTuple->employee,
+  for (int i = 0; i < itemsCardinality; ++i) {
+    struct ItemTuple* itemTuple = &db->items[i];
+    int hashValue = hash2(itemTuple->salesDate, itemTuple->employee,
                           salesDateEmployeeToCountCardinality);
-    while (salesDateEmployeeToCountHT[hashValue].count >= 0 &&
+    while (salesDateEmployeeToCountHT[hashValue].count > 0 &&
            !(salesDateEmployeeToCountHT[hashValue].salesDate ==
-                 orderTuple->salesDate &&
+                 itemTuple->salesDate &&
              salesDateEmployeeToCountHT[hashValue].employee ==
-                 orderTuple->employee)) {
+                 itemTuple->employee)) {
       // If we have already inserted the pair (salesDate, employee) in the
       // table, we don't need to add it again and the while terminates.
       // This guarantees the uniqueness in the keys of the table.
       hashValue =
           nextSlotLinear(hashValue, salesDateEmployeeToCountCardinality);
     }
-    if (salesDateEmployeeToCountHT[hashValue].count < 0) {
+    if (salesDateEmployeeToCountHT[hashValue].count == 0) {
       // Adding new pair (salesDate, employee).
-      salesDateEmployeeToCountHT[hashValue].count = 0;
-      salesDateEmployeeToCountHT[hashValue].salesDate = orderTuple->salesDate;
-      salesDateEmployeeToCountHT[hashValue].employee = orderTuple->employee;
+      salesDateEmployeeToCountHT[hashValue].salesDate = itemTuple->salesDate;
+      salesDateEmployeeToCountHT[hashValue].employee = itemTuple->employee;
     }
-  }
-  // Iterate through items to count how many rows have a particular pair
-  // (salesDate, employee) that can be merged with orders.
-  for (size_t i = 0; i < db->itemsCardinality; ++i) {
-    struct ItemTuple* itemsTuple = &db->items[i];
-    int hashValue = hash2(itemsTuple->salesDate, itemsTuple->employee,
-                          salesDateEmployeeToCountCardinality);
-    while (salesDateEmployeeToCountHT[hashValue].count >= 0 &&
-           !(salesDateEmployeeToCountHT[hashValue].salesDate ==
-                 itemsTuple->salesDate &&
-             salesDateEmployeeToCountHT[hashValue].employee ==
-                 itemsTuple->employee)) {
-      hashValue =
-          nextSlotLinear(hashValue, salesDateEmployeeToCountCardinality);
-    }
-    salesDateEmployeeToCountHT[hashValue].count +=
-        salesDateEmployeeToCountHT[hashValue].count >= 0;
+    salesDateEmployeeToCountHT[hashValue].count++;
   }
 
   struct Indices* indices = db->indices;
