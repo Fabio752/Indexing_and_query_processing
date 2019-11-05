@@ -339,21 +339,16 @@ void* Q3ProbeOrders(void* args) {
         int hashValueSalesDateEmployee =
             hash2(orderTuple->salesDate, orderTuple->employee,
                   salesDateEmployeeToCountCardinality);
-        // TODO: change these condition to have == instead of !=. Usually ==
-        // evaluates to false earlier.
-        while (
-            salesDateEmployeeToCountHT[hashValueSalesDateEmployee].count >= 0 &&
-            !(salesDateEmployeeToCountHT[hashValueSalesDateEmployee]
-                      .salesDate == orderTuple->salesDate &&
-              salesDateEmployeeToCountHT[hashValueSalesDateEmployee].employee ==
-                  orderTuple->employee)) {
+        while (!(
+            salesDateEmployeeToCountHT[hashValueSalesDateEmployee].salesDate ==
+                orderTuple->salesDate &&
+            salesDateEmployeeToCountHT[hashValueSalesDateEmployee].employee ==
+                orderTuple->employee)) {
           hashValueSalesDateEmployee = nextSlotLinear(
               hashValueSalesDateEmployee, salesDateEmployeeToCountCardinality);
         }
-        if (salesDateEmployeeToCountHT[hashValueSalesDateEmployee].count >= 0) {
-          tuplesCount +=
-              salesDateEmployeeToCountHT[hashValueSalesDateEmployee].count;
-        }
+        tuplesCount +=
+            salesDateEmployeeToCountHT[hashValueSalesDateEmployee].count;
       }
       hashValueStores = nextSlotLinear(hashValueStores, sizeStores);
     }
@@ -591,7 +586,6 @@ void* buildQ3Index(void* args) {
   struct ThreadDataBuildIndex* threadData = (struct ThreadDataBuildIndex*)args;
   struct Database* db = threadData->db;
 
-  // TODO: try different size.
   int itemsCardinality = (int)db->itemsCardinality;
   int salesDateEmployeeToCountCardinality = db->ordersCardinality * 2;
   struct SalesDateEmployeeToCount* salesDateEmployeeToCountHT =
